@@ -1,10 +1,11 @@
 # tutor.ai — Contexto do Projeto
 
 ## Estado Atual
-Versão em desenvolvimento: **v0.1.0 (Fundação)** — em verificação manual (Fase H).
+**v0.1.0 (Fundação) — concluída, commitada e pushada para o GitHub.**
+Próxima versão a iniciar: **v0.2.0** (CRUD de matérias/tópicos, upload de PDF, chunking, embeddings).
 Última sessão: 2026-04-29
 
-**Versionamento:** o remote `https://github.com/minepedro/tutor-ai.git` existe, mas só tem o commit inicial de docs (`99c3ca2 docs: add architecture and roadmap`). Todo o código da v0.1.0 está **untracked localmente** — nada foi commitado nem pushado ainda. Os commits convencionais por fase serão feitos quando a Fase H passar.
+**Versionamento:** todos os 7 commits por fase + commit do CLAUDE.md estão em `origin/main`. Tag `v0.1.0` aponta para o commit `0294e2a` (Fase G — último commit funcional da fundação). Disponível em https://github.com/minepedro/tutor-ai/tree/v0.1.0.
 
 ## O que já está implementado
 
@@ -90,30 +91,29 @@ Versão em desenvolvimento: **v0.1.0 (Fundação)** — em verificação manual 
 
 ## Próximos Passos
 
-**Fase H — Verificação manual (em andamento)**
+**Fase H — Verificação manual ✅ (concluída)**
 - [x] `npm run dev` abre janela sem erros
-- [x] Onboarding aceita API key e navega para Home
 - [x] `npm run typecheck` passa sem erros
-- [ ] Persistência: fechar/reabrir app deve pular onboarding
-- [ ] Onboarding com download ONNX: API key + barra de progresso até 100% + navega
-- [ ] Modelo: `%APPDATA%/tutor-ai/models/all-MiniLM-L6-v2.onnx` existe (~30 MB)
-- [ ] DB: abrir `%APPDATA%/tutor-ai/database.db` no DB Browser → confirmar 12 tabelas
-- [ ] LanceDB: confirmar `%APPDATA%/tutor-ai/embeddings/` criado
-- [ ] Settings: trocar chave + "Limpar tudo" com modal de confirmação
-- [ ] DevTools console: sem erros de CSP nem warnings React
-- [ ] Tema: bg `#08080d`, accent `#7c5cfc`, fontes Outfit + JetBrains Mono OK
+- [x] Onboarding com download ONNX: API key + barra de progresso até 100% + navega
+- [x] Modelo: `%APPDATA%/tutor-ai/models/all-MiniLM-L6-v2.onnx` existe
+- [x] DB: 12 tabelas confirmadas no DB Browser
+- [x] LanceDB: `%APPDATA%/tutor-ai/embeddings/` criado
+- [x] Settings: trocar chave + "Limpar tudo" funcionam
+- [x] Persistência da API key (boot pula direto pra Home)
+- [x] DevTools console limpo, tema OK
 
-**Commit da v0.1.0**
-Quando a Fase H passar, fazer commits convencionais por fase (mais fácil reverter):
-- `chore(setup): configs base (Fase A)`
-- `feat(electron): main + preload + IPC base (Fase B)`
-- `feat(db): schema + connection (Fase C)`
-- `feat(ipc): settings + safeStorage (Fase D)`
-- `feat(ui): design system + layout (Fase E)`
-- `feat(pages): onboarding + home + settings (Fase F)`
-- `feat(embeddings): ONNX + LanceDB + setup-models (Fase G)`
+**Commits da v0.1.0 ✅ (8 commits + tag pushados)**
 
-Depois `git push origin main` (perguntar antes — primeira vez subindo código real).
+| | Hash | Commit |
+|--|--|--|
+| 1 | `67cda2d` | chore(setup): bootstrap project with electron-vite (Fase A) |
+| 2 | `4584780` | feat(electron): main, preload and typed IPC contract (Fase B) |
+| 3 | `d69d30e` | feat(db): SQLite schema and connection singleton (Fase C) |
+| 4 | `0d3a0e5` | feat(ipc): settings + safeStorage with encryption fallback (Fase D) |
+| 5 | `f20d987` | feat(ui): design system and app layout (Fase E) |
+| 6 | `3d57b6a` | feat(pages): onboarding, home and settings pages (Fase F) |
+| 7 | `0294e2a` | 🏷 **v0.1.0** feat(embeddings): ONNX runtime + LanceDB + model download (Fase G) |
+| 8 | `6d5babe` | docs(context): add CLAUDE.md for cross-session continuity |
 
 **Próximas versões** (ver [docs/TODO.md](docs/TODO.md))
 - **v0.2.0** — CRUD de matérias/tópicos, upload de PDF, extração de texto, chunking, geração de embeddings
