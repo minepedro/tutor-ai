@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+
+/*
+  Tailwind 4 lê o tema diretamente daqui via @theme.
+  Cada custom property exposta aqui vira uma classe utilitária:
+    --color-bg        →  bg-bg, text-bg, border-bg, etc.
+    --color-accent    →  bg-accent, text-accent, ...
+    --font-sans       →  font-sans
+    --font-mono       →  font-mono
+*/
+@theme {
+  --color-bg: #08080d;
+  --color-bg-elevated: #111119;
+  --color-surface: #16161f;
+  --color-border: #22222e;
+
+  --color-text: #f4f4f5;
+  --color-text-muted: #a1a1aa;
+  --color-text-subtle: #71717a;
+
+  --color-accent: #7c5cfc;
+  --color-accent-hover: #6b4def;
+  --color-accent-soft: #7c5cfc20;
+
+  --color-success: #4ade80;
+  --color-warning: #facc15;
+  --color-danger: #f87171;
+
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius-card: 12px;
+  --radius-input: 8px;
+}
+
+/* Fontes embutidas via Google Fonts CDN.
+   Nota: a CSP permite fonts apenas de 'self' e data:, então estamos
+   importando os arquivos via @font-face inline (a partir do CDN do Google).
+   Se quisermos modo 100% offline depois, baixamos os .woff2 e referenciamos
+   localmente — basta trocar as URLs e remover o fonts.googleapis.com do CSP. */
+
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: local('Outfit'), local('Outfit Variable');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: local('JetBrains Mono'), local('JetBrainsMono');
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar dark */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-subtle);
+}
+
+/* Selection */
+::selection {
+  background-color: var(--color-accent-soft);
+  color: var(--color-text);
+}

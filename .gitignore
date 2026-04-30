@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+
+# Environment / secrets
+.env
+.env.local
+
+# Local databases (created at runtime in userData)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+embeddings/
+
+# ONNX model (downloaded by `npm run setup-models` or via onboarding)
+models/*.onnx
+models/*.bin
+models/*.json
+!models/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# TS incremental build
+*.tsbuildinfo
