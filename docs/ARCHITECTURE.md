@@ -14,11 +14,12 @@ O app é distribuído como executável via Electron. A única dependência exter
 |---|---|---|
 | Desktop | Electron 33+ | Maduro, grande ecossistema, multiplataforma |
 | Frontend | React 19 + Vite 6 + TypeScript | Produtivo, tipado, ecossistema extenso |
-| Estilização | Tailwind CSS 4 | Dark theme nativo, utility-first, responsivo |
-| Roteamento | React Router 7 | Navegação entre páginas do app |
+| Bundler | electron-vite 5 | Unifica main/preload/renderer com HMR |
+| Estilização | Tailwind CSS 4 | CSS-first via `@theme` — sem `tailwind.config.ts` nem PostCSS |
+| Roteamento | React Router 7 (HashRouter) | Compatível com `file://` em produção do Electron |
 | Banco de dados | better-sqlite3 | Síncrono, rápido, sem ORM, arquivo único |
 | Embeddings | onnxruntime-node + all-MiniLM-L6-v2 | Busca semântica local, offline, gratuito |
-| Busca vetorial | LanceDB | Embedded, Node.js nativo, sem servidor |
+| Busca vetorial | `@lancedb/lancedb` | Embedded, Node.js nativo, sem servidor |
 | IA | API Anthropic (Claude Sonnet) | Geração de quiz, chat, resolução de exercícios |
 | Segurança | Electron safeStorage | API key encriptada pelo SO |
 | Build | electron-builder | Gera executáveis Win/Mac/Linux |
@@ -31,15 +32,17 @@ O app é distribuído como executável via Electron. A única dependência exter
 tutor-ai/
 │
 ├── electron/                              # MAIN PROCESS (Node.js)
-│   ├── main.ts                            # Entry point, cria janela
+│   ├── main.ts                            # Entry point, cria janela, CSP
 │   ├── preload.ts                         # contextBridge (segurança)
+│   ├── types.d.ts                         # Declaração do `?raw` import do Vite
 │   │
 │   ├── ipc/                               # IPC handlers (backend)
 │   │   ├── claude.ipc.ts                  # Proxy seguro para API
 │   │   ├── database.ipc.ts                # CRUD no SQLite
 │   │   ├── files.ipc.ts                   # Upload, leitura de arquivos
 │   │   ├── embeddings.ipc.ts              # Gerar/buscar embeddings
-│   │   └── settings.ipc.ts                # API key, preferências
+│   │   ├── settings.ipc.ts                # API key, preferências
+│   │   └── setup.ipc.ts                   # Download do modelo ONNX (progresso via webContents.send)
 │   │
 │   ├── services/                          # Lógica de negócio
 │   │   ├── claude.service.ts              # Chamadas à API do Claude
@@ -49,12 +52,14 @@ tutor-ai/
 │   │   └── spaced-repetition.service.ts   # Algoritmo FSRS
 │   │
 │   ├── database/
-│   │   ├── connection.ts                  # Inicializa SQLite
-│   │   ├── schema.sql                     # Criação das tabelas
+│   │   ├── connection.ts                  # Inicializa SQLite (singleton + WAL)
+│   │   ├── lancedb.ts                     # Conexão LanceDB + tabela chunks (384-dim)
+│   │   ├── schema.sql                     # Criação das tabelas (embutido via ?raw)
 │   │   ├── migrations/                    # Alterações futuras
 │   │   └── repositories/                  # Queries organizadas por entidade
 │   │       ├── subjects.repo.ts
 │   │       ├── topics.repo.ts
+│   │       ├── sources.repo.ts
 │   │       ├── quizzes.repo.ts
 │   │       ├── flashcards.repo.ts
 │   │       ├── exercises.repo.ts
@@ -62,7 +67,7 @@ tutor-ai/
 │   │       └── chunks.repo.ts
 │   │
 │   └── utils/
-│       ├── pdf-parser.ts                  # Extração de texto de PDF
+│       ├── pdf-parser.ts                  # Extração de texto de PDF (pdf-parse)
 │       ├── text-chunker.ts                # Divide texto em chunks ~500 tokens
 │       └── crypto.ts                      # safeStorage helpers
 │
@@ -163,11 +168,12 @@ tutor-ai/
 │
 ├── .env.example                           # ANTHROPIC_API_KEY=sua-chave-aqui
 ├── .gitignore
+├── .npmrc                                 # Configura node-gyp para compilar nativos contra Electron
 ├── package.json                           # Dependências e scripts
-├── tsconfig.json                          # TypeScript config (renderer)
-├── tsconfig.node.json                     # TypeScript config (electron)
-├── vite.config.ts                         # Vite config
-├── tailwind.config.ts                     # Tailwind config
+├── tsconfig.json                          # Raiz (project references)
+├── tsconfig.node.json                     # TypeScript config (electron + scripts)
+├── tsconfig.web.json                      # TypeScript config (renderer)
+├── electron.vite.config.ts                # electron-vite (main + preload + renderer)
 ├── electron-builder.yml                   # Config para gerar executáveis
 ├── LICENSE                                # MIT
 └── README.md                              # Documentação principal
@@ -402,8 +408,8 @@ Enviar o PDF direto com "gere um quiz" produz perguntas genéricas, superficiais
 
 ```
 Upload do PDF
-    → Extrai texto (página por página)
-    → Divide em chunks de ~500 tokens
+    → Extrai texto (página por página) — pdf-parse
+    → Divide em chunks de ~500 tokens (estratégia abaixo)
     → ONNX (all-MiniLM-L6-v2) gera embedding de cada chunk
     → LanceDB salva os vetores
     → SQLite salva os metadados do chunk
@@ -415,6 +421,17 @@ Pergunta do usuário no chat
     → Monta contexto: system prompt + chunks + histórico resumido
     → Claude responde baseado no material do aluno
 ```
+
+### Estratégia de chunking
+
+Decidida na v0.2.0:
+
+1. **Quebra primária por parágrafos** (separadores: `\n\n`). Mantém unidades semânticas inteiras quando cabem em 500 tokens.
+2. **Parágrafos longos** (>500 tokens) são subdivididos em chunks de ~500 tokens. A contagem usa aproximação `chars / 4` (rápida, sem dependência de tokenizer; suficiente porque o limite é "soft" — o ONNX trunca em 256 tokens internos de qualquer jeito).
+3. **Overlap de 50 tokens** entre chunks vizinhos (sliding window). Preserva contexto na fronteira: se a resposta certa estiver "partida" entre dois chunks, ainda aparece em pelo menos um deles na busca.
+4. **Lib de extração:** `pdf-parse` — node-only, maduro, suficiente para PDFs acadêmicos típicos. Upgrade para `pdfjs-dist` (Mozilla) só se aparecerem PDFs com layout complexo que quebram.
+
+> Tokenizer de produção (`tiktoken`, `@huggingface/tokenizers`) ficaria mais preciso mas adicionaria dependência nativa. A aproximação `chars / 4` é o trade-off escolhido para a v0.2.0 — pode ser revisitada se a qualidade do RAG cair.
 
 ### Gerenciamento de contexto
 - Sliding window: mantém últimas 10 mensagens do chat
@@ -436,10 +453,11 @@ Acessado via `app.getPath('userData')` do Electron.
 ```
 tutor-ai/                        (userData)
 ├── database.db                  ← SQLite: tudo do app
+├── .apikey                      ← API key encriptada (safeStorage)
 ├── embeddings/                  ← LanceDB: vetores para busca
 ├── sources/                     ← PDFs e arquivos originais
-│   ├── a1b2c3d4.pdf             ← renomeados com hash único
-│   └── e5f6g7h8.txt
+│   ├── a1b2c3d4...e5f6.pdf      ← renomeados com SHA-256 do conteúdo (dedupe automático)
+│   └── 9c8b7a6...d3e2.txt
 └── models/                      ← Modelo ONNX
     └── all-MiniLM-L6-v2.onnx
 ```
@@ -453,12 +471,73 @@ tutor-ai/                        (userData)
 ## Segurança
 
 - API key encriptada via safeStorage do Electron (Keychain/Credential Manager/libsecret)
+- Em sistemas sem keyring disponível (ex: Linux sem libsecret), o status `EncryptionStatus` é exposto explicitamente como `os-backed | plaintext-fallback | unavailable`. O app avisa o usuário em Settings quando cai em fallback — nunca silenciosamente.
 - Frontend (renderer) nunca acessa Node.js, banco, ou API key diretamente
 - Toda comunicação via IPC com contratos tipados pelo preload.ts (contextBridge)
 - Prepared statements no SQLite (sem SQL injection)
 - Nenhum dado sai da máquina exceto chamadas à API do Claude
-- Content Security Policy no Electron bloqueia scripts externos
+- Content Security Policy no Electron bloqueia scripts externos (`connect-src` libera apenas `https://api.anthropic.com`)
 - Entrada do usuário sanitizada antes de salvar no banco
+
+---
+
+## Padrões de Implementação
+
+Convenções aprendidas durante a v0.1.0 que valem para todas as versões.
+
+### IPC tipado em 3 lugares sincronizados
+
+Cada método IPC vive em três arquivos que precisam ficar coerentes — o TypeScript funciona como guarda:
+
+1. **`src/types/ipc.ts`** — fonte da verdade. Define a `interface IpcApi` com namespaces (`app`, `settings`, `setup`, ...). Inclui `declare global { interface Window { readonly api: IpcApi } }` para o renderer ter `window.api` tipado em todo lugar.
+2. **`electron/preload.ts`** — `contextBridge.exposeInMainWorld('api', { ... })` tipado como `IpcApi`. TS valida que o objeto exposto bate com o contrato.
+3. **`electron/ipc/<area>.ipc.ts`** — registra os handlers via `ipcMain.handle('namespace:method', ...)`.
+
+Adicionar um IPC novo = editar `IpcApi` e seguir os erros do TS. Não há atalho para "esquecer um lado" — o build quebra.
+
+### Eventos de progresso: `webContents.send` + `ipcRenderer.on`
+
+Funções não atravessam IPC (JSON não serializa código). Para operações longas com progresso, o padrão correto é:
+
+- **Main** envia eventos com `win.webContents.send('canal:progress', { pct, status })`.
+- **Preload** registra `ipcRenderer.on('canal:progress', handler)` e expõe ao renderer uma função que recebe um callback. Essa função retorna outra função de cleanup que faz `ipcRenderer.off(...)`.
+- **Renderer** chama `api.setup.onProgress(cb)` num `useEffect` e usa o retorno como cleanup.
+
+A função de invoke (ex: `api.setup.downloadModel()`) só resolve a Promise quando termina. O progresso vem por canal separado.
+
+### SQL embutido no bundle via `import ?raw`
+
+`import schema from './schema.sql?raw';` faz o Vite ler o arquivo em build time e embutir o conteúdo como string no bundle. Vantagens:
+
+- Sem cópia de arquivo em runtime — o SQL viaja dentro do binário.
+- Refatorar nome/local do `.sql` é refletido pelo TS/Vite.
+- Funciona igual em dev e em prod (sem `__dirname` shenanigans).
+
+Requer a declaração em `electron/types.d.ts`:
+
+```ts
+declare module '*.sql?raw' {
+  const sql: string;
+  export default sql;
+}
+```
+
+### Build de módulos nativos no Windows
+
+`better-sqlite3` é um módulo nativo. Em Node 24 + Windows, o build padrão falha no link (`/LTCG:INCREMENTAL` com ClangCL). Solução em `.npmrc`:
+
+```
+runtime=electron
+target=33.2.0
+disturl=https://electronjs.org/headers
+msbuild_toolset=v143
+```
+
+Isso força node-gyp a compilar contra os headers do Electron com o toolset MSVC v143. O `@electron/rebuild` roda como `postinstall` para garantir recompilação ao trocar versão do Electron.
+
+### Schema idempotente — sem migrations na v0.1.0
+
+Todas as tabelas usam `CREATE TABLE IF NOT EXISTS`. O schema é carregado integral toda vez que o app inicia e nunca destrói nada. Migrations entram quando a primeira mudança de schema acontecer (provável v0.2.0+).
 
 ---
 
@@ -472,21 +551,37 @@ tutor-ai/                        (userData)
     "react-router-dom": "^7.0.0",
     "better-sqlite3": "^11.0.0",
     "onnxruntime-node": "^1.19.0",
-    "vectordb": "^0.5.0",
+    "@lancedb/lancedb": "^0.18.0",
     "@anthropic-ai/sdk": "^0.30.0",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "pdf-parse": "^1.1.0"
   },
   "devDependencies": {
     "electron": "^33.0.0",
+    "electron-vite": "^5.0.0",
     "electron-builder": "^25.0.0",
+    "@electron/rebuild": "^3.6.0",
     "vite": "^6.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "@tailwindcss/vite": "^4.0.0",
     "typescript": "^5.6.0",
     "tailwindcss": "^4.0.0",
     "@types/react": "^19.0.0",
-    "@types/better-sqlite3": "^7.0.0"
+    "@types/better-sqlite3": "^7.0.0",
+    "@types/pdf-parse": "^1.1.0"
+  },
+  "scripts": {
+    "postinstall": "electron-rebuild"
   }
 }
 ```
+
+> **Nota sobre nativos no Windows + Node 24:** o `.npmrc` força node-gyp a usar
+> os headers do Electron (`runtime=electron`, `target=33.2.0`,
+> `disturl=https://electronjs.org/headers`) e o toolset MSVC v143 para evitar
+> falhas no `/LTCG:INCREMENTAL` do ClangCL ao compilar `better-sqlite3`. O
+> `@electron/rebuild` roda como `postinstall` para garantir que os módulos
+> nativos sejam recompilados contra a versão do Electron em uso.
 
 ---
 
@@ -523,11 +618,37 @@ Uso normal
 ## .gitignore
 
 ```
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+out/
 release/
+
+# Environment / secrets
 .env
-models/*.onnx
+.env.local
+
+# Local databases (created at runtime in userData)
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 embeddings/
+
+# ONNX model (downloaded by `npm run setup-models` or via onboarding)
+models/*.onnx
+models/*.bin
+models/*.json
+!models/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# TS incremental build
+*.tsbuildinfo
 ```
