@@ -4,6 +4,9 @@ import { getDb, closeDb } from './database/connection';
 import { initChunksTable } from './database/lancedb';
 import { registerSettingsHandlers } from './ipc/settings.ipc';
 import { registerSetupHandlers } from './ipc/setup.ipc';
+import { registerDatabaseHandlers } from './ipc/database.ipc';
+import { registerFilesHandlers } from './ipc/files.ipc';
+import { registerEmbeddingsHandlers } from './ipc/embeddings.ipc';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -71,6 +74,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('app:getPlatform', () => process.platform);
   registerSettingsHandlers();
   registerSetupHandlers();
+  registerDatabaseHandlers();
+  registerFilesHandlers();
+  registerEmbeddingsHandlers();
 }
 
 app.whenReady().then(async () => {

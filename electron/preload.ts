@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { IpcApi } from '@shared/ipc';
 
 const api: IpcApi = {
@@ -12,6 +12,49 @@ const api: IpcApi = {
     loadApiKey: () => ipcRenderer.invoke('settings:loadApiKey'),
     getEncryptionStatus: () => ipcRenderer.invoke('settings:getEncryptionStatus'),
     clearAll: () => ipcRenderer.invoke('settings:clearAll'),
+  },
+  subjects: {
+    list: () => ipcRenderer.invoke('subjects:list'),
+    get: (id) => ipcRenderer.invoke('subjects:get', id),
+    create: (input) => ipcRenderer.invoke('subjects:create', input),
+    update: (id, patch) => ipcRenderer.invoke('subjects:update', id, patch),
+    delete: (id) => ipcRenderer.invoke('subjects:delete', id),
+  },
+  topics: {
+    listBySubject: (subjectId) => ipcRenderer.invoke('topics:listBySubject', subjectId),
+    get: (id) => ipcRenderer.invoke('topics:get', id),
+    create: (input) => ipcRenderer.invoke('topics:create', input),
+    update: (id, patch) => ipcRenderer.invoke('topics:update', id, patch),
+    delete: (id) => ipcRenderer.invoke('topics:delete', id),
+  },
+  sources: {
+    listByTopic: (topicId) => ipcRenderer.invoke('sources:listByTopic', topicId),
+    get: (id) => ipcRenderer.invoke('sources:get', id),
+  },
+  files: {
+    pickAndUpload: (topicId) => ipcRenderer.invoke('files:pickAndUpload', topicId),
+    uploadFromPaths: (topicId, paths) =>
+      ipcRenderer.invoke('files:uploadFromPaths', topicId, paths),
+    deleteSource: (sourceId) => ipcRenderer.invoke('files:deleteSource', sourceId),
+    /*
+      💡 Resolve o caminho absoluto de um File arrastado do SO. Em Electron 32+
+      `file.path` foi removido; webUtils.getPathForFile é o substituto oficial.
+      Precisa rodar no mesmo process que recebeu o evento de drag — o preload
+      compartilha o renderer process então isso funciona aqui.
+    */
+    getDroppedPath: (file) => webUtils.getPathForFile(file),
+  },
+  embeddings: {
+    ingest: (sourceId) => ipcRenderer.invoke('embeddings:ingest', sourceId),
+    countBySource: (sourceId) => ipcRenderer.invoke('embeddings:countBySource', sourceId),
+    onProgress: (callback) => {
+      type ProgressData = { sourceId: string; pct: number; status: string };
+      const handler = (_event: Electron.IpcRendererEvent, data: ProgressData) => {
+        callback(data);
+      };
+      ipcRenderer.on('embeddings:progress', handler);
+      return () => ipcRenderer.off('embeddings:progress', handler);
+    },
   },
   setup: {
     downloadModel: () => ipcRenderer.invoke('setup:downloadModel'),

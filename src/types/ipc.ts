@@ -9,6 +9,11 @@ export interface IpcApi {
   app: AppApi;
   settings: SettingsApi;
   setup: SetupApi;
+  subjects: SubjectsApi;
+  topics: TopicsApi;
+  sources: SourcesApi;
+  files: FilesApi;
+  embeddings: EmbeddingsApi;
 }
 
 /*
@@ -64,6 +69,169 @@ export interface SetupApi {
 }
 
 export type EncryptionStatus = 'os-backed' | 'plaintext-fallback' | 'unavailable';
+
+/*
+  💡 Tipo "Subject" da entidade — espelha as colunas da tabela `subjects`
+  com nomes em camelCase. O repo no main faz o mapeamento snake_case → camelCase.
+
+  Esse tipo vive aqui (em types/ipc.ts) porque trafega por IPC. Tipos que
+  só existem no main (ex: SubjectRow do banco) ficam confinados no repo.
+*/
+export interface Subject {
+  id: string;
+  name: string;
+  /** Cor hex (ex: '#7c5cfc'). Default no banco se não fornecida. */
+  color: string;
+  /** Emoji único representando a matéria. Default '📚'. */
+  emoji: string;
+  /** ISO-like 'YYYY-MM-DD HH:MM:SS' (formato do SQLite CURRENT_TIMESTAMP). */
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSubjectInput {
+  name: string;
+  color?: string;
+  emoji?: string;
+}
+
+export type UpdateSubjectInput = Partial<CreateSubjectInput>;
+
+export interface SubjectsApi {
+  list(): Promise<Subject[]>;
+  get(id: string): Promise<Subject | null>;
+  create(input: CreateSubjectInput): Promise<Subject>;
+  update(id: string, patch: UpdateSubjectInput): Promise<Subject>;
+  delete(id: string): Promise<void>;
+}
+
+/*
+  Tópicos pertencem a uma matéria (FK + ON DELETE CASCADE no schema).
+  `description` é opcional na criação e pode ser `null` no update — passar
+  `null` explicitamente é o jeito de limpar a descrição.
+*/
+export interface Topic {
+  id: string;
+  subjectId: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+}
+
+export interface CreateTopicInput {
+  subjectId: string;
+  name: string;
+  description?: string;
+}
+
+export interface UpdateTopicInput {
+  name?: string;
+  description?: string | null;
+}
+
+export interface TopicsApi {
+  listBySubject(subjectId: string): Promise<Topic[]>;
+  get(id: string): Promise<Topic | null>;
+  create(input: CreateTopicInput): Promise<Topic>;
+  update(id: string, patch: UpdateTopicInput): Promise<Topic>;
+  delete(id: string): Promise<void>;
+}
+
+/*
+  Sources são materiais (PDFs, textos) ligados a um tópico. v0.2.0 só suporta PDF.
+  `rawText` e `extractedConcepts` ficam null até o pipeline de ingestão (Fase E/F)
+  processar o arquivo.
+*/
+export type SourceFileType = 'pdf' | 'txt' | 'url' | 'paste';
+
+export interface Source {
+  id: string;
+  topicId: string;
+  filename: string;
+  fileType: SourceFileType;
+  /** SHA-256 do conteúdo. Usado para dedup em disco e no banco. */
+  contentHash: string;
+  /** Caminho absoluto no disco (userData/sources/<hash>.<ext>). */
+  filePath: string;
+  rawText: string | null;
+  extractedConcepts: string | null;
+  /** Número de chunks indexados. 0 enquanto o pipeline de ingestão não rodou. */
+  chunkCount: number;
+  createdAt: string;
+}
+
+export interface SourcesApi {
+  listByTopic(topicId: string): Promise<Source[]>;
+  get(id: string): Promise<Source | null>;
+}
+
+/*
+  Operações de upload/exclusão de arquivos. Vivem fora de `sources` porque
+  envolvem efeitos colaterais no disco (file dialog, copy, unlink), não só DB.
+*/
+export interface FilesApi {
+  /**
+   * Abre o file dialog do SO em multi-select. Retorna a lista de sources
+   * processadas (vazia se cancelou ou se nada foi escolhido).
+   *
+   * Idempotente por arquivo: se um SHA-256 já existe no tópico, retorna a
+   * source existente em vez de criar uma nova.
+   */
+  pickAndUpload(topicId: string): Promise<Source[]>;
+  /**
+   * Versão para drag-and-drop. O renderer resolve os paths via
+   * `getDroppedPath` (preload) e envia a lista pra cá.
+   */
+  uploadFromPaths(topicId: string, paths: string[]): Promise<Source[]>;
+  /**
+   * Remove a linha em `sources` e (se for a última referência) o arquivo no disco.
+   * Também limpa os vetores associados no LanceDB.
+   */
+  deleteSource(sourceId: string): Promise<void>;
+  /**
+   * Resolve o caminho absoluto de um File arrastado do SO. Síncrono — chama
+   * `webUtils.getPathForFile` direto no preload.
+   *
+   * 💡 Em Electron 32+ a propriedade `file.path` foi removida; este é o
+   * substituto oficial. Precisa rodar no mesmo process que recebeu o drag.
+   */
+  getDroppedPath(file: File): string;
+}
+
+/*
+  Pipeline de ingestão: extrai texto, divide em chunks, gera embeddings,
+  persiste em SQLite (texto) e LanceDB (vetores).
+
+  O progresso é reportado via `onProgress` (event-based, igual ao SetupApi).
+  O sourceId vem em cada evento — abre porta pra rodar várias ingestões em
+  paralelo no futuro sem confundir o estado da UI.
+*/
+export interface IngestResult {
+  sourceId: string;
+  chunkCount: number;
+  pageCount: number;
+}
+
+export interface EmbeddingProgress {
+  sourceId: string;
+  pct: number;
+  status: string;
+}
+
+export interface EmbeddingsApi {
+  /**
+   * Processa uma source (PDF) — texto + chunks + embeddings.
+   * Pode demorar (segundos a minutos dependendo do tamanho). Use onProgress()
+   * pra mostrar feedback ao usuário.
+   */
+  ingest(sourceId: string): Promise<IngestResult>;
+  /** Conta quantos chunks já existem indexados para esta source. */
+  countBySource(sourceId: string): Promise<number>;
+  /**
+   * Subscribe a eventos de progresso. Retorna função de cleanup.
+   */
+  onProgress(callback: (event: EmbeddingProgress) => void): () => void;
+}
 
 /*
   💡 `declare global` injeta tipos no escopo global. Aqui estamos dizendo:
