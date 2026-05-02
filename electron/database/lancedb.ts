@@ -38,3 +38,45 @@ export async function initChunksTable(): Promise<void> {
     await table.delete('id = "__init__"');
   }
 }
+
+export interface ChunkVectorRecord {
+  id: string;
+  source_id: string;
+  chunk_index: number;
+  vector: number[];
+}
+
+async function getChunksTable() {
+  const db = await getLanceDb();
+  return db.openTable('chunks');
+}
+
+/**
+ * Insere vetores de chunks no LanceDB. Aceita batch (mais rápido que loop).
+ * O `id` deve bater com o `id` do chunk no SQLite — é a chave de junção entre
+ * os dois bancos.
+ */
+export async function insertChunkVectors(records: ChunkVectorRecord[]): Promise<void> {
+  if (records.length === 0) return;
+  const table = await getChunksTable();
+  /*
+    💡 Cast no boundary: LanceDB tipa o input como `Record<string, unknown>[]`
+    (aceita qualquer schema). Nosso `ChunkVectorRecord` é mais estrito — todas
+    as chaves são conhecidas. O cast aqui é seguro porque a interface tem só
+    chaves string e LanceDB não introspecciona a "extensão" do tipo.
+  */
+  await table.add(records as unknown as Array<Record<string, unknown>>);
+}
+
+/**
+ * Apaga todos os vetores de uma source. Usado quando a source é removida —
+ * o cascade do SQLite limpa `document_chunks`, mas o LanceDB precisa ser
+ * sincronizado explicitamente porque vive em outro storage.
+ *
+ * 💡 LanceDB usa SQL-like predicate strings; aspas simples escapam o id.
+ */
+export async function deleteChunkVectorsBySource(sourceId: string): Promise<void> {
+  const table = await getChunksTable();
+  // Escape simples: id é UUID v4, então não tem ' nem outros caracteres SQL.
+  await table.delete(`source_id = '${sourceId}'`);
+}
