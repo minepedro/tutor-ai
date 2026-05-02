@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { getSource, updateSourceProcessing } from '../database/repositories/sources.repo';
 import {
+  findProcessedSourceByHash,
+  getSource,
+  updateSourceProcessing,
+} from '../database/repositories/sources.repo';
+import {
+  copyChunksToSource,
   countChunksBySource,
   createChunksBatch,
   deleteChunksBySource,
@@ -11,6 +16,7 @@ import { embed } from './embedding.service';
 import {
   deleteChunkVectorsBySource,
   insertChunkVectors,
+  listChunkVectorsBySource,
   type ChunkVectorRecord,
 } from '../database/lancedb';
 
@@ -34,7 +40,10 @@ export type ProgressCallback = (pct: number, status: string) => void;
 export interface IngestResult {
   sourceId: string;
   chunkCount: number;
-  pageCount: number;
+  /** Ausente no fast-path (dedup) — não lemos o PDF nesse caso. */
+  pageCount?: number;
+  /** True se chunks vieram de outra source com mesmo hash (fast-path). */
+  reused?: boolean;
 }
 
 export async function ingestSource(
@@ -49,12 +58,27 @@ export async function ingestSource(
   }
 
   // Idempotência: se já tem chunks, limpa antes de re-processar.
-  // Em v0.2.0 isso só acontece se o usuário forçar re-ingestão; o fluxo normal
+  // Em v0.2.x isso só acontece se o usuário forçar re-ingestão; o fluxo normal
   // de upload novo nunca cai aqui (source recém-criada não tem chunks).
   const existingCount = countChunksBySource(sourceId);
   if (existingCount > 0) {
     deleteChunksBySource(sourceId);
     await deleteChunkVectorsBySource(sourceId);
+  }
+
+  // ── 0. Fast-path: dedup por content_hash ─────────────────────────────────
+  // Se outra source com o mesmo hash já foi processada, copiamos os chunks
+  // (texto + vetores) em vez de re-extrair/re-chunkar/re-embedar. Economiza
+  // o trabalho mais caro do pipeline (~80% do tempo total).
+  const reusable = findProcessedSourceByHash(source.contentHash, sourceId);
+  if (reusable && reusable.rawText !== null) {
+    return await reuseFromSource({
+      sourceToUpdate: source.id,
+      reusableSourceId: reusable.id,
+      reusableRawText: reusable.rawText,
+      reusableChunkCount: reusable.chunkCount,
+      onProgress,
+    });
   }
 
   // ── 1. Extração ──────────────────────────────────────────────────────────
@@ -129,4 +153,75 @@ export async function ingestSource(
 
 function formatNumber(n: number): string {
   return n.toLocaleString('pt-BR');
+}
+
+/*
+  Fast-path do pipeline: copia chunks + vetores de uma source já processada
+  com o mesmo content_hash. Economiza extração/chunking/embedding (~80% do
+  tempo). Mecânica:
+
+  1. Copia linhas em document_chunks com novos UUIDs (mesma `chunk_index`,
+     `content`, `token_count`). Retorna mapa `oldId → newId`.
+  2. Lê os vetores da source antiga no LanceDB.
+  3. Reescreve cada vetor com o `id` correspondente do mapa e o `source_id`
+     da nova source. Insere em batch.
+  4. Atualiza a `raw_text` da nova source com o texto da fonte antiga.
+
+  Total: ~3 queries, sem chamada ao ONNX. Quase instantâneo.
+*/
+interface ReuseArgs {
+  sourceToUpdate: string;
+  reusableSourceId: string;
+  reusableRawText: string;
+  reusableChunkCount: number;
+  onProgress: ProgressCallback;
+}
+
+async function reuseFromSource(args: ReuseArgs): Promise<IngestResult> {
+  const {
+    sourceToUpdate,
+    reusableSourceId,
+    reusableRawText,
+    reusableChunkCount,
+    onProgress,
+  } = args;
+
+  onProgress(
+    20,
+    `Reaproveitando ${reusableChunkCount} chunks já processados…`,
+  );
+
+  // 1. Copia chunks em SQLite (gera IdMap pra sincronizar com LanceDB).
+  const idMap = copyChunksToSource(reusableSourceId, sourceToUpdate);
+
+  onProgress(60, 'Copiando vetores…');
+
+  // 2. Lê vetores antigos e reescreve com novos ids + nova source_id.
+  const oldVectors = await listChunkVectorsBySource(reusableSourceId);
+  const newVectors: ChunkVectorRecord[] = oldVectors
+    .map((v) => {
+      const newId = idMap[v.id];
+      if (!newId) return null; // chunk no LanceDB sem par no SQLite — anomalia, ignora
+      return {
+        id: newId,
+        source_id: sourceToUpdate,
+        chunk_index: v.chunk_index,
+        vector: v.vector,
+      };
+    })
+    .filter((v): v is ChunkVectorRecord => v !== null);
+
+  await insertChunkVectors(newVectors);
+
+  // 3. Marca a source como processada copiando o rawText. Sem isso, a UI
+  //    ainda mostraria "processamento pendente" mesmo com chunks indexados.
+  updateSourceProcessing(sourceToUpdate, { rawText: reusableRawText });
+
+  onProgress(100, `${newVectors.length} chunks reaproveitados`);
+
+  return {
+    sourceId: sourceToUpdate,
+    chunkCount: newVectors.length,
+    reused: true,
+  };
 }

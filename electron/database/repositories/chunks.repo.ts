@@ -114,3 +114,51 @@ export function countChunksBySource(sourceId: string): number {
 export function deleteChunksBySource(sourceId: string): void {
   getDb().prepare(`DELETE FROM document_chunks WHERE source_id = ?`).run(sourceId);
 }
+
+/**
+ * Mapa retornado por `copyChunksToSource`: antigo chunk id → novo chunk id.
+ * O caller usa esse mapa pra sincronizar os vetores no LanceDB com os mesmos
+ * IDs novos (chave de junção entre os dois bancos).
+ */
+export type IdMap = Record<string, string>;
+
+/**
+ * Duplica os chunks de uma source pra outra, gerando novos UUIDs.
+ *
+ * Usado pelo dedup do pipeline: quando a source nova (B) tem o mesmo
+ * `content_hash` de uma source já processada (A), copiamos os chunks de A pra
+ * B em vez de re-extrair/re-chunkar/re-embedar. Cada chunk copiado precisa de
+ * novo id (PK), e o conteúdo (`content`, `chunk_index`, `page_number`,
+ * `token_count`) vem do original.
+ *
+ * Retorna `IdMap` mapeando ids antigos → novos. O caller usa esse mapa pra
+ * copiar os vetores correspondentes no LanceDB com os mesmos ids novos.
+ */
+export function copyChunksToSource(fromSourceId: string, toSourceId: string): IdMap {
+  const db = getDb();
+  const oldChunks = listChunksBySource(fromSourceId);
+
+  const insertStmt = db.prepare(
+    `INSERT INTO document_chunks (id, source_id, chunk_index, content, page_number, token_count)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+
+  const idMap: IdMap = {};
+  const copyAll = db.transaction(() => {
+    for (const old of oldChunks) {
+      const newId = randomUUID();
+      idMap[old.id] = newId;
+      insertStmt.run(
+        newId,
+        toSourceId,
+        old.chunkIndex,
+        old.content,
+        old.pageNumber,
+        old.tokenCount,
+      );
+    }
+  });
+  copyAll();
+
+  return idMap;
+}

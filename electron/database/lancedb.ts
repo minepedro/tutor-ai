@@ -80,3 +80,37 @@ export async function deleteChunkVectorsBySource(sourceId: string): Promise<void
   // Escape simples: id é UUID v4, então não tem ' nem outros caracteres SQL.
   await table.delete(`source_id = '${sourceId}'`);
 }
+
+/**
+ * Lê todos os vetores de uma source. Usado pelo dedup pra reaproveitar
+ * embeddings já calculados em outra source com o mesmo conteúdo.
+ *
+ * 💡 Estratégia: scan completo + filtro em JS. A API `query().where()` do
+ * lancedb-node se mostrou flaky em algumas versões (trava em vez de retornar);
+ * scan + filter é robusto e a tabela é pequena (centenas de vetores no v0.2.x).
+ *
+ * Retorna no mesmo formato de `ChunkVectorRecord`. Float32Array vindo do Arrow
+ * é convertido pra number[] pra bater com o tipo de insert.
+ */
+export async function listChunkVectorsBySource(
+  sourceId: string,
+): Promise<ChunkVectorRecord[]> {
+  const table = await getChunksTable();
+
+  const rows = (await table.query().toArray()) as Array<{
+    id: string;
+    source_id: string;
+    chunk_index: number;
+    vector: number[] | Float32Array;
+  }>;
+
+  return rows
+    .filter((r) => r.source_id === sourceId)
+    .map((r) => ({
+      id: r.id,
+      source_id: r.source_id,
+      chunk_index: r.chunk_index,
+      // Arrow pode entregar como Float32Array; insertChunkVectors exige number[].
+      vector: Array.isArray(r.vector) ? r.vector : Array.from(r.vector),
+    }));
+}

@@ -209,7 +209,12 @@ export interface FilesApi {
 export interface IngestResult {
   sourceId: string;
   chunkCount: number;
-  pageCount: number;
+  /** Número de páginas do PDF. Ausente quando o pipeline reaproveita chunks
+   *  de outra source via dedup (não lê o PDF nesse caso). */
+  pageCount?: number;
+  /** True se os chunks foram copiados de uma source existente com mesmo
+   *  content_hash em vez de re-processados. */
+  reused?: boolean;
 }
 
 export interface EmbeddingProgress {

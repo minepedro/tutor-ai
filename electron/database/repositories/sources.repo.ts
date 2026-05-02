@@ -112,6 +112,33 @@ export function findSourceByHash(topicId: string, contentHash: string): Source |
   return row ? mapRow(row) : null;
 }
 
+/**
+ * Procura uma source **já processada** (com `raw_text` e chunks) que tenha o
+ * mesmo `contentHash`, em qualquer tópico. Usado pelo pipeline de ingestão
+ * pra detectar oportunidade de dedup: em vez de extrair/chunkar/embedar de
+ * novo, copia os chunks da source existente.
+ *
+ * O `exceptSourceId` é a própria source que está sendo processada — não
+ * queremos retornar ela mesma (ela ainda não tem chunks na primeira ingestão).
+ */
+export function findProcessedSourceByHash(
+  contentHash: string,
+  exceptSourceId: string,
+): Source | null {
+  const stmt = getDb().prepare<[string, string], SourceRow>(
+    `${SOURCE_WITH_COUNT_SELECT}
+     WHERE s.content_hash = ?
+       AND s.id != ?
+       AND s.raw_text IS NOT NULL
+     GROUP BY s.id
+     HAVING chunk_count > 0
+     ORDER BY s.created_at ASC
+     LIMIT 1`,
+  );
+  const row = stmt.get(contentHash, exceptSourceId);
+  return row ? mapRow(row) : null;
+}
+
 export function createSource(input: CreateSourceInput): Source {
   const id = randomUUID();
   const stmt = getDb().prepare(
