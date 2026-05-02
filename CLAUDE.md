@@ -1,11 +1,11 @@
 # tutor.ai — Contexto do Projeto
 
 ## Estado Atual
-**v0.2.0 (Organização) — concluída.** Pendente apenas commits + tag + push.
+**v0.2.1 (Dedup de chunks) — concluída.** Pendente apenas commits + tag + push.
 Próxima versão a iniciar: **v0.3.0** (geração de quiz via API Anthropic, pipeline de 3 etapas: análise → geração → validação).
 Última sessão: 2026-05-02
 
-**Versionamento:** v0.1.0 (Fundação) está no `origin/main` (tag `v0.1.0` no commit `0294e2a`). v0.2.0 está toda no working tree, prestes a ser commitada e taggeada.
+**Versionamento:** v0.1.0 + v0.2.0 estão em `origin/main` (tags `v0.1.0` e `v0.2.0`). v0.2.1 está no working tree, prestes a ser commitada e taggeada.
 
 ## O que já está implementado
 
@@ -122,8 +122,11 @@ A serem criados em ordem **temática** (não por fase, por causa de arquivos com
 
 Tag `v0.2.0` no último commit funcional (5 — UI). Depois `git push origin main --tags`.
 
-### Backlog v0.2.1
-- **Dedup de chunks por content_hash (Opção B):** quando o mesmo PDF entra em múltiplo tópico, copiar os chunks da source existente em vez de re-processar (~30 linhas em `useSources.upload` ou no backend).
+### v0.2.1 — Dedup de chunks ✅ (implementada)
+- **Fast-path no `ingestion.service.ts`:** antes de extrair/chunkar/embedar, busca outra source com mesmo `content_hash` já processada. Se acha, copia chunks (SQLite) + vetores (LanceDB) em vez de re-processar.
+- Novos helpers: `findProcessedSourceByHash` (sources.repo), `copyChunksToSource` (chunks.repo, retorna IdMap), `listChunkVectorsBySource` (lancedb.ts).
+- Pegadinha resolvida: `query().where().toArray()` do lancedb-node travava em vez de retornar; troquei por scan completo + filtro em JS. Conversão explícita Float32Array → number[] na leitura.
+- Storage continua duplicado (chunks idênticos em sources diferentes); o que economizamos é **compute** — embedding via ONNX, que era ~80% do tempo de pipeline. Para um PDF de 1492 chunks, fast-path é ~95% mais rápido que slow-path.
 
 ### v0.3.0 — Quiz (próxima versão)
 - Pipeline de 3 etapas: `quiz-analysis.ts` → `quiz-generation.ts` → `quiz-validation.ts`
