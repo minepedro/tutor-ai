@@ -4,6 +4,8 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { Home } from '@/pages/Home';
 import { Onboarding } from '@/pages/Onboarding';
 import { Settings } from '@/pages/Settings';
+import { SubjectView } from '@/pages/SubjectView';
+import { TopicView } from '@/pages/TopicView';
 import { ROUTES } from '@/lib/constants';
 
 export function App() {
@@ -38,6 +40,8 @@ export function App() {
           element={hasKey ? <AppLayout /> : <Navigate to={ROUTES.ONBOARDING} replace />}
         >
           <Route path={ROUTES.HOME} element={<Home />} />
+          <Route path={ROUTES.SUBJECT_VIEW} element={<SubjectView />} />
+          <Route path={ROUTES.TOPIC_VIEW} element={<TopicView />} />
           <Route path={ROUTES.SETTINGS} element={<Settings />} />
         </Route>
 
