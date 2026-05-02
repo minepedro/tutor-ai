@@ -9,16 +9,14 @@ import {
   countChunksBySource,
   createChunksBatch,
   deleteChunksBySource,
-} from '../database/repositories/chunks.repo';
-import { extractPdfText } from '../utils/pdf-parser';
-import { chunkText } from '../utils/text-chunker';
-import { embed } from './embedding.service';
-import {
   deleteChunkVectorsBySource,
   insertChunkVectors,
   listChunkVectorsBySource,
   type ChunkVectorRecord,
-} from '../database/lancedb';
+} from '../database/repositories/chunks.repo';
+import { extractPdfText } from '../utils/pdf-parser';
+import { chunkText } from '../utils/text-chunker';
+import { embed } from './embedding.service';
 
 /*
   Pipeline de ingestão: source (PDF já em disco) → texto extraído → chunks →

@@ -13,7 +13,7 @@ import {
   type SourceFileType,
 } from '../database/repositories/sources.repo';
 import { getTopic } from '../database/repositories/topics.repo';
-import { deleteChunkVectorsBySource } from '../database/lancedb';
+import { deleteChunkVectorsBySource } from '../database/repositories/chunks.repo';
 
 /*
   Upload de arquivos. Estratégia:

@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../connection';
+import { getLanceDb } from '../lancedb';
 
 /*
   Chunks de documento — armazenam o TEXTO no SQLite e o VETOR no LanceDB.
   O `id` é a chave de junção entre os dois bancos: mesmo UUID nas duas pontas.
 
+  Este arquivo unifica as operações de chunk pros dois stores (text + vector)
+  porque chunk é a entidade conceitual única, mesmo que viva em dois lugares
+  fisicamente. A pasta `lancedb.ts` cuida só da conexão.
+
   ON DELETE CASCADE no schema cuida de limpar chunks SQLite quando a source
   some. Os vetores LanceDB são sincronizados manualmente em `files.ipc.ts`
-  (LanceDB não tem FK).
+  e no pipeline de ingestão (LanceDB não tem FK).
 */
 
 export interface DocumentChunk {
@@ -161,4 +166,80 @@ export function copyChunksToSource(fromSourceId: string, toSourceId: string): Id
   copyAll();
 
   return idMap;
+}
+
+// ── Operações no LanceDB (vetores) ────────────────────────────────────────
+
+export interface ChunkVectorRecord {
+  id: string;
+  source_id: string;
+  chunk_index: number;
+  vector: number[];
+}
+
+async function getChunksTable() {
+  const db = await getLanceDb();
+  return db.openTable('chunks');
+}
+
+/**
+ * Insere vetores de chunks no LanceDB. Aceita batch (mais rápido que loop).
+ * O `id` deve bater com o `id` do chunk no SQLite — chave de junção.
+ */
+export async function insertChunkVectors(records: ChunkVectorRecord[]): Promise<void> {
+  if (records.length === 0) return;
+  const table = await getChunksTable();
+  /*
+    💡 Cast no boundary: LanceDB tipa o input como `Record<string, unknown>[]`
+    (aceita qualquer schema). Nosso `ChunkVectorRecord` é mais estrito — todas
+    as chaves são conhecidas. Cast aqui é seguro porque a interface tem só
+    chaves string e LanceDB não introspecciona a "extensão" do tipo.
+  */
+  await table.add(records as unknown as Array<Record<string, unknown>>);
+}
+
+/**
+ * Apaga todos os vetores de uma source. Usado quando a source é removida —
+ * o cascade do SQLite limpa `document_chunks`, mas o LanceDB precisa ser
+ * sincronizado explicitamente porque vive em outro storage.
+ *
+ * 💡 LanceDB usa SQL-like predicate strings; aspas simples escapam o id.
+ *    UUID v4 não tem aspas internas, então concatenação é segura.
+ */
+export async function deleteChunkVectorsBySource(sourceId: string): Promise<void> {
+  const table = await getChunksTable();
+  await table.delete(`source_id = '${sourceId}'`);
+}
+
+/**
+ * Lê todos os vetores de uma source. Usado pelo dedup pra reaproveitar
+ * embeddings já calculados em outra source com o mesmo conteúdo.
+ *
+ * 💡 Estratégia: scan completo + filtro em JS. A API `query().where()` do
+ * lancedb-node se mostrou flaky em algumas versões (trava em vez de retornar);
+ * scan + filter é robusto e a tabela é pequena (centenas-milhares de vetores).
+ *
+ * Retorna no formato `ChunkVectorRecord`. Float32Array vindo do Arrow é
+ * convertido pra number[] pra bater com o tipo de insert.
+ */
+export async function listChunkVectorsBySource(
+  sourceId: string,
+): Promise<ChunkVectorRecord[]> {
+  const table = await getChunksTable();
+
+  const rows = (await table.query().toArray()) as Array<{
+    id: string;
+    source_id: string;
+    chunk_index: number;
+    vector: number[] | Float32Array;
+  }>;
+
+  return rows
+    .filter((r) => r.source_id === sourceId)
+    .map((r) => ({
+      id: r.id,
+      source_id: r.source_id,
+      chunk_index: r.chunk_index,
+      vector: Array.isArray(r.vector) ? r.vector : Array.from(r.vector),
+    }));
 }

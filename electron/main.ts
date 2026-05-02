@@ -4,7 +4,9 @@ import { getDb, closeDb } from './database/connection';
 import { initChunksTable } from './database/lancedb';
 import { registerSettingsHandlers } from './ipc/settings.ipc';
 import { registerSetupHandlers } from './ipc/setup.ipc';
-import { registerDatabaseHandlers } from './ipc/database.ipc';
+import { registerSubjectsHandlers } from './ipc/subjects.ipc';
+import { registerTopicsHandlers } from './ipc/topics.ipc';
+import { registerSourcesHandlers } from './ipc/sources.ipc';
 import { registerFilesHandlers } from './ipc/files.ipc';
 import { registerEmbeddingsHandlers } from './ipc/embeddings.ipc';
 
@@ -74,7 +76,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('app:getPlatform', () => process.platform);
   registerSettingsHandlers();
   registerSetupHandlers();
-  registerDatabaseHandlers();
+  registerSubjectsHandlers();
+  registerTopicsHandlers();
+  registerSourcesHandlers();
   registerFilesHandlers();
   registerEmbeddingsHandlers();
 }
