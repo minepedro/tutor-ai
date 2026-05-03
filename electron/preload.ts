@@ -77,6 +77,15 @@ const api: IpcApi = {
       return () => ipcRenderer.off('quizzes:progress', handler);
     },
   },
+  chat: {
+    listConversations: (scope) => ipcRenderer.invoke('chat:listConversations', scope),
+    get: (id) => ipcRenderer.invoke('chat:get', id),
+    create: (input) => ipcRenderer.invoke('chat:create', input),
+    sendMessage: (conversationId, content) =>
+      ipcRenderer.invoke('chat:sendMessage', conversationId, content),
+    rename: (id, title) => ipcRenderer.invoke('chat:rename', id, title),
+    delete: (id) => ipcRenderer.invoke('chat:delete', id),
+  },
   setup: {
     downloadModel: () => ipcRenderer.invoke('setup:downloadModel'),
     isModelReady: () => ipcRenderer.invoke('setup:isModelReady'),

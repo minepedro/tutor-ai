@@ -15,6 +15,7 @@ export interface IpcApi {
   files: FilesApi;
   embeddings: EmbeddingsApi;
   quizzes: QuizzesApi;
+  chat: ChatApi;
 }
 
 /*
@@ -365,6 +366,104 @@ export interface QuizzesApi {
   rename(id: string, title: string): Promise<Quiz>;
   /** Subscribe a eventos de progresso da geração. Retorna cleanup. */
   onProgress(callback: (event: QuizGenerationProgress) => void): () => void;
+}
+
+/*
+  ─── Chat (RAG) ───────────────────────────────────────────────────────────
+  Conversas escopadas em document/topic/subject. Mensagens persistem; ao
+  enviar, o backend busca chunks relevantes (RAG), monta contexto e chama
+  Claude. A resposta volta junto com os chunks usados (UI mostra fontes).
+
+  v0.4.0 não suporta `inline` ainda (escopo dentro do quiz/flashcard) — vai
+  pra v0.5+.
+*/
+
+export type ChatScopeType = 'inline' | 'document' | 'topic' | 'subject';
+export type ChatMessageRole = 'user' | 'assistant';
+
+export interface ChatScope {
+  scopeType: ChatScopeType;
+  scopeId: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  role: ChatMessageRole;
+  content: string;
+  /** IDs dos chunks usados como contexto (preenchido só em mensagens 'assistant'). */
+  contextChunkIds: string[] | null;
+  createdAt: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string | null;
+  scopeType: ChatScopeType;
+  scopeId: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  scopeType: ChatScopeType;
+  scopeId: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  /** Primeiros ~80 chars da última mensagem (pra preview na lista lateral). */
+  preview: string | null;
+}
+
+export interface CreateConversationInput extends ChatScope {
+  title?: string | null;
+}
+
+/**
+ * Chunk retornado junto com a resposta do chat — UI usa pra mostrar "fontes".
+ * Inclui filename do PDF original e índice do chunk pra citação.
+ */
+export interface ChatRagChunk {
+  chunkId: string;
+  sourceId: string;
+  sourceFilename: string;
+  chunkIndex: number;
+  content: string;
+  /** Cosine distance: menor = mais similar à pergunta. */
+  distance: number;
+}
+
+export interface SendMessageResult {
+  userMessage: ChatMessage;
+  assistantMessage: ChatMessage;
+  /** Chunks que entraram no contexto da resposta. Pode ser vazio se RAG não achou nada. */
+  chunks: ChatRagChunk[];
+}
+
+export interface ChatApi {
+  /** Lista conversas de um escopo (mais recentes primeiro). */
+  listConversations(scope: ChatScope): Promise<ConversationSummary[]>;
+  /** Busca conversa pelo id, com todas as mensagens em ordem cronológica. */
+  get(id: string): Promise<Conversation | null>;
+  /** Cria conversa nova (ainda vazia, sem mensagens). */
+  create(input: CreateConversationInput): Promise<Conversation>;
+  /**
+   * Envia mensagem do usuário. Backend executa o pipeline RAG + Claude e
+   * persiste user msg + assistant response. Retorna ambas + chunks usados.
+   *
+   * 💡 O escopo da busca RAG é derivado da CONVERSA (não da rota atual).
+   * Isso garante coerência: se o usuário mudar de tópico no meio da conversa,
+   * o RAG continua usando o escopo original em que ela foi criada.
+   *
+   * Pode demorar ~3-8s (1 chamada de embedding + 1 de Claude). Sem
+   * streaming na v0.4.0 — ver decisão em ADR (v0.4.1+ pode adicionar).
+   */
+  sendMessage(conversationId: string, content: string): Promise<SendMessageResult>;
+  rename(id: string, title: string): Promise<Conversation>;
+  delete(id: string): Promise<void>;
 }
 
 /*
