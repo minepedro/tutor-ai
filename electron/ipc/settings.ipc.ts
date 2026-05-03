@@ -9,6 +9,7 @@ import {
   getEncryptionStatus,
 } from '../utils/crypto';
 import { closeDb } from '../database/connection';
+import { resetClaudeClient } from '../services/claude.service';
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle('settings:saveApiKey', (_event, key: string) => {
@@ -16,6 +17,8 @@ export function registerSettingsHandlers(): void {
       throw new Error('API key inválida');
     }
     saveApiKey(key.trim());
+    // Cliente cacheado fica stale ao trocar a chave — descarta pra recriar.
+    resetClaudeClient();
   });
 
   ipcMain.handle('settings:hasApiKey', () => hasApiKey());
@@ -46,5 +49,6 @@ export function registerSettingsHandlers(): void {
     }
 
     deleteApiKey();
+    resetClaudeClient();
   });
 }
