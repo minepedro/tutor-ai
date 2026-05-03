@@ -6,6 +6,9 @@ import { Onboarding } from '@/pages/Onboarding';
 import { Settings } from '@/pages/Settings';
 import { SubjectView } from '@/pages/SubjectView';
 import { TopicView } from '@/pages/TopicView';
+import { QuizSetup } from '@/pages/QuizSetup';
+import { QuizPlay } from '@/pages/QuizPlay';
+import { QuizResults } from '@/pages/QuizResults';
 import { ROUTES } from '@/lib/constants';
 
 export function App() {
@@ -42,6 +45,9 @@ export function App() {
           <Route path={ROUTES.HOME} element={<Home />} />
           <Route path={ROUTES.SUBJECT_VIEW} element={<SubjectView />} />
           <Route path={ROUTES.TOPIC_VIEW} element={<TopicView />} />
+          <Route path={ROUTES.QUIZ_SETUP} element={<QuizSetup />} />
+          <Route path={ROUTES.QUIZ_PLAY} element={<QuizPlay />} />
+          <Route path={ROUTES.QUIZ_RESULTS} element={<QuizResults />} />
           <Route path={ROUTES.SETTINGS} element={<Settings />} />
         </Route>
 

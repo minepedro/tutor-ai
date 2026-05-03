@@ -4,9 +4,10 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { SourceCard } from '@/components/SourceCard';
+import { QuizHistoryList } from '@/components/quiz/QuizHistoryList';
 import { useIPC } from '@/hooks/useIPC';
 import { useSources } from '@/hooks/useSources';
-import { ROUTES, subjectViewPath } from '@/lib/constants';
+import { quizSetupPath, ROUTES, subjectViewPath } from '@/lib/constants';
 import type { Source, Subject, Topic } from '@/types/ipc';
 
 export function TopicView() {
@@ -162,9 +163,18 @@ export function TopicView() {
           >
             ← Voltar
           </Button>
-          <Button onClick={() => void upload()} loading={uploading}>
-            + Subir PDF
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => navigate(quizSetupPath(topic.id))}
+              disabled={sources.filter((s) => s.rawText !== null).length === 0}
+            >
+              🎯 Gerar quiz
+            </Button>
+            <Button onClick={() => void upload()} loading={uploading}>
+              + Subir PDF
+            </Button>
+          </div>
         </div>
 
         {topic.description && (
@@ -196,6 +206,9 @@ export function TopicView() {
             </p>
           </div>
         )}
+
+        {/* Histórico de quizzes do tópico (componente esconde se vazio) */}
+        <QuizHistoryList topicId={topic.id} />
       </main>
 
       {/*
