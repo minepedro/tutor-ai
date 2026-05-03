@@ -104,6 +104,27 @@ export function listChunksBySource(sourceId: string): DocumentChunk[] {
   return stmt.all(sourceId).map(mapRow);
 }
 
+/**
+ * Busca múltiplos chunks por uma lista de IDs. Usado pelo RAG depois da
+ * busca vetorial: o LanceDB devolve top-K ids; aqui pegamos o `content`
+ * (texto) e demais metadados de cada um.
+ *
+ * 💡 Construímos a cláusula IN dinamicamente com placeholders. Como better-sqlite3
+ * exige o número exato de `?` na query preparada, geramos uma string de N
+ * marcadores baseado no tamanho do array. Como os IDs vão por bind (parâmetros),
+ * não há risco de injection.
+ */
+export function getChunksByIds(ids: string[]): DocumentChunk[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  const stmt = getDb().prepare<string[], ChunkRow>(
+    `SELECT id, source_id, chunk_index, content, page_number, token_count, created_at
+     FROM document_chunks
+     WHERE id IN (${placeholders})`,
+  );
+  return stmt.all(...ids).map(mapRow);
+}
+
 export function countChunksBySource(sourceId: string): number {
   const stmt = getDb().prepare<[string], { count: number }>(
     `SELECT COUNT(*) as count FROM document_chunks WHERE source_id = ?`,
@@ -225,7 +246,21 @@ export async function deleteChunkVectorsBySource(sourceId: string): Promise<void
 export async function listChunkVectorsBySource(
   sourceId: string,
 ): Promise<ChunkVectorRecord[]> {
+  return listChunkVectorsBySources([sourceId]);
+}
+
+/**
+ * Versão multi-source: lê vetores de N sources de uma vez. Usada pelo RAG
+ * quando o escopo abrange múltiplos PDFs (tópico/matéria inteira).
+ *
+ * Mesmo padrão de scan + filter em JS pra robustez (ver ADR-019).
+ */
+export async function listChunkVectorsBySources(
+  sourceIds: string[],
+): Promise<ChunkVectorRecord[]> {
+  if (sourceIds.length === 0) return [];
   const table = await getChunksTable();
+  const allowed = new Set(sourceIds);
 
   const rows = (await table.query().toArray()) as Array<{
     id: string;
@@ -235,7 +270,7 @@ export async function listChunkVectorsBySource(
   }>;
 
   return rows
-    .filter((r) => r.source_id === sourceId)
+    .filter((r) => allowed.has(r.source_id))
     .map((r) => ({
       id: r.id,
       source_id: r.source_id,
