@@ -28,6 +28,7 @@ models/*.json
 Thumbs.db
 .vscode/
 .idea/
+.claude/
 
 # TS incremental build
 *.tsbuildinfo
