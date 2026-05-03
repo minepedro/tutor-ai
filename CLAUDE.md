@@ -1,8 +1,8 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.2.1 (Dedup de chunks)** publicada. Próximo: **v0.3.0 — Quiz** (pipeline de 3 etapas: análise → geração → validação, telas QuizSetup/QuizPlay/QuizResults).
-Última sessão: 2026-05-02
+**v0.3.0 (Quiz)** publicada. Próximo: **v0.4.0 — Chat com RAG** (chat lateral com escopo configurável, retrieval via embeddings, citações de fonte).
+Última sessão: 2026-05-03
 
 ## O que é este projeto
 Desktop app open source de estudo com IA. Usuário sobe PDFs, app gera quizzes/flashcards/exercícios e responde dúvidas baseado **no material dele** (RAG local). Tudo roda offline; só chamada externa é à API Anthropic.

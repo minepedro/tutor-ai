@@ -448,10 +448,96 @@ Data: 2026-05-02 · Status: ✅ Aceita
 
 ---
 
+## ADR-022: Quiz com pipeline de 3 etapas + Sonnet 4.6 + cache de análise
+Data: 2026-05-02 · Status: ✅ Aceita
+
+### Contexto
+A v0.3.0 precisa gerar quizzes a partir do material do usuário. Decisões correlatas: qual modelo da Anthropic, quantas chamadas, como evitar custo desnecessário.
+
+### Decisão
+- **Modelo:** `claude-sonnet-4-6` como default fixo. Sem toggle de Opus na v0.3.0.
+- **Pipeline:** 3 chamadas sequenciais, não 1. Etapas: análise (extrai conceitos) → geração (gera perguntas a partir dos conceitos) → validação (filtra ambíguas/triviais/duplicadas).
+- **Cache:** resultado da análise é serializado em `sources.extracted_concepts` (coluna que já existia no schema desde v0.1.0). Quizzes futuros do mesmo material pulam a etapa 1.
+- **Modo único:** só pipeline "quality" (3 etapas). Sem modo "quick" (1 chamada) na v0.3.0.
+
+### Alternativas consideradas
+- **Opus 4.7** — descartada: 5x mais caro, qualidade marginalmente melhor pra essa tarefa estruturada.
+- **Haiku 4.5** — descartada: distratores ficam fracos (alternativas erradas óbvias).
+- **1 chamada (PDF + "gera 10 perguntas")** — descartada: gera perguntas superficiais ou sobre o documento em si (autor, capa) em vez do conteúdo.
+- **Modo "quick" como toggle** — descartado: complexidade extra sem benefício claro. Adicionar se feedback de uso pedir.
+- **Sem cache** — descartado: gerar 5 quizzes do mesmo PDF custaria 5x a etapa 1.
+
+### Consequências
++ Qualidade alta de perguntas: distratores plausíveis, mistura de dificuldades, explicações detalhadas
++ Custo controlado: ~$0.05-$0.10 por quiz de 10 perguntas no Sonnet
++ Cache reduz custo de quizzes repetidos do mesmo material em ~30%
+- Pipeline demora ~30-60s (3 chamadas sequenciais) — aceitável mas não ágil
+- Sem opção pro usuário escolher modelo/modo
+
+---
+
+## ADR-023: Sem `claude.ipc.ts` — proxy seguro só por feature
+Data: 2026-05-02 · Status: ✅ Aceita
+
+### Contexto
+ARCHITECTURE.md original previa um `claude.ipc.ts` como "proxy seguro pra API". Implementando, percebi que não é necessário: o renderer nunca precisa fazer uma chamada genérica ao Claude. Sempre é por feature (gerar quiz, sugerir tema, futuro: enviar mensagem no chat).
+
+### Decisão
+- `claude.service.ts` (main process) é interno: só outros services do main usam.
+- IPC pro renderer é sempre **feature-specific**: `quizzes:generate`, `quizzes:suggestThemes`, futuro `chat:sendMessage`.
+- Renderer nunca tem acesso à API key nem chama Claude diretamente.
+
+### Alternativas consideradas
+- **`claude.ipc.ts` com método `complete(params)` genérico** — descartada: aumenta superfície de ataque. Renderer poderia mandar qualquer prompt; perde validação semântica por feature.
+- **Expor o cliente Anthropic ao renderer via contextBridge** — descartada: API key viraria visível, e Anthropic SDK não roda no contexto isolado do renderer.
+
+### Consequências
++ Cada feature define seu próprio contrato (quiz IPC, chat IPC futuro)
++ Validação de input específica por feature
++ Mais fácil rastrear custo por feature
+- Mais boilerplate por feature nova
+- Não dá pra "chamar Claude direto" do renderer pra debug; usar `inspect-db.ts` ou similar
+
+---
+
+## ADR-024: Pipeline tolerante a falhas + parser parcial de JSON
+Data: 2026-05-02 · Status: ✅ Aceita
+
+### Contexto
+LLMs ocasionalmente:
+- Retornam JSON truncado quando bate em `max_tokens`
+- Retornam texto explicativo em vez de JSON ("Não consegui...")
+- Geram 1 pergunta malformada no meio de N OK
+- Falham em 1 source de N (PDF bagunçado)
+
+Comportamento original: qualquer falha = aborta tudo. Frustração alta pro usuário.
+
+### Decisão
+Robustez em camadas, do mais externo pro mais interno:
+
+1. **Per-source na análise**: se 1 PDF falha, continua com os outros. Aborta só se TODOS falharem.
+2. **`max_tokens` generoso**: aumentado pra `min(700 × N + 2000, 8192)` na geração. Cobre 99% dos casos em PT.
+3. **Parser parcial de array JSON** (`parseLooseJsonArrayPartial`): se JSON está truncado no meio do último objeto, recupera os anteriores completos via state machine que respeita aspas/escape.
+4. **Validação por pergunta**: pergunta malformada vira `console.warn`, não erro fatal.
+5. **Validação inteira opcional**: se a etapa 3 falhar de parsear, assume todas válidas em vez de abortar (validação é "filtro bonus", não bloqueante).
+
+### Alternativas consideradas
+- **Streaming** com parsing incremental — economizaria tempo + se truncar dá pra retomar. Complexidade alta; não vale pra v0.3.0.
+- **Tools / structured outputs do Anthropic** — força JSON válido no nível do SDK. Requer refactor maior; deixar pra v0.4.0+.
+- **Retry automático em falha de parse** — risco de loop infinito se o problema for material ruim. Melhor parar e mostrar erro claro.
+
+### Consequências
++ Quiz raramente aborta por falha do modelo
++ Logs no terminal com primeiros 1500 chars da resposta crua quando JSON parse falha (debug)
++ Per-source isolation: 1 PDF problemático não bloqueia os outros
+- Usuário pode receber menos perguntas que pediu (10 → 7) sem aviso óbvio na UI atual
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-022)
+1. Próximo número (ADR-025)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta
