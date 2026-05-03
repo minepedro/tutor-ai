@@ -83,9 +83,20 @@ export async function ingestSource(
   onProgress(5, 'Lendo PDF…');
   const parsed = await extractPdfText(source.filePath);
 
-  if (parsed.text.trim().length === 0) {
+  /*
+    Guard de texto utilizável. Empíricamente, PDFs escaneados sem OCR voltam
+    com texto vazio OU com só headers/numeração de página (~50-200 chars).
+    Embeddings nesses caracteres lixo não ajudam, e quizzes a partir disso
+    geram respostas inválidas (Claude retorna JSON vazio ou texto).
+    O limite de 300 chars é heurístico — barra a maioria dos PDFs imagem
+    enquanto não bloqueia documentos genuinamente curtos (1-2 parágrafos).
+  */
+  const usefulChars = parsed.text.trim().length;
+  if (usefulChars < 300) {
     throw new Error(
-      'PDF sem texto extraível. Pode ser um PDF escaneado (OCR não suportado na v0.2.0).',
+      'Esse PDF parece não ter texto extraível (provavelmente é uma imagem ou scan). ' +
+        'OCR não é suportado nesta versão. Procure uma versão do material em PDF de texto, ' +
+        'ou copie o conteúdo manualmente em outro arquivo.',
     );
   }
 
