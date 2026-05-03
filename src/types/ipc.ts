@@ -14,6 +14,7 @@ export interface IpcApi {
   sources: SourcesApi;
   files: FilesApi;
   embeddings: EmbeddingsApi;
+  quizzes: QuizzesApi;
 }
 
 /*
@@ -236,6 +237,134 @@ export interface EmbeddingsApi {
    * Subscribe a eventos de progresso. Retorna função de cleanup.
    */
   onProgress(callback: (event: EmbeddingProgress) => void): () => void;
+}
+
+/*
+  ─── Quizzes ──────────────────────────────────────────────────────────────
+  Geração + persistência + jogada de quizzes.
+
+  Gerar um quiz é uma operação cara (~3 chamadas à API Anthropic, ~30s pra
+  10 perguntas). Por isso usa o mesmo padrão de progresso event-based que
+  embeddings: `generate()` resolve no fim, mas `onProgress` empurra eventos
+  durante o processo (Análise → Geração → Validação).
+*/
+
+export type QuestionType = 'multiple_choice' | 'true_false';
+export type QuestionTypePref = QuestionType | 'mixed';
+export type QuestionDifficulty = 'easy' | 'medium' | 'hard';
+export type QuizMode = 'quick' | 'quality';
+
+export interface QuizQuestion {
+  id: string;
+  quizId: string;
+  type: QuestionType;
+  difficulty: QuestionDifficulty;
+  question: string;
+  options: string[];
+  /** Index 0-based da opção correta. */
+  correctIndex: number;
+  /** Resposta do usuário; null se ainda não respondeu. */
+  selectedIndex: number | null;
+  /** Resultado da resposta; null se ainda não respondeu. */
+  isCorrect: boolean | null;
+  explanation: string;
+  /** Reservado pra v0.4.0 (chat inline na pergunta). */
+  doubtQuestion: string | null;
+  doubtResponse: string | null;
+  answeredAt: string | null;
+}
+
+export interface Quiz {
+  id: string;
+  topicId: string;
+  /** Null se quiz veio de múltiplas sources do mesmo tópico. */
+  sourceId: string | null;
+  title: string | null;
+  quizMode: QuizMode;
+  totalQuestions: number;
+  /** Número de acertos; null se ainda não foi finalizado. */
+  score: number | null;
+  timeSpentSeconds: number | null;
+  completedAt: string | null;
+  createdAt: string;
+  questions: QuizQuestion[];
+}
+
+/** Versão leve do Quiz pra listagem (sem perguntas). */
+export interface QuizSummary {
+  id: string;
+  topicId: string;
+  sourceId: string | null;
+  title: string | null;
+  totalQuestions: number;
+  score: number | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface GenerateQuizInput {
+  topicId: string;
+  /** Pelo menos 1. Se múltiplos, source_id no quiz fica null. */
+  sourceIds: string[];
+  /** 3-30 perguntas (validado no backend). */
+  count: number;
+  types: QuestionTypePref;
+  /** Filtro de tema livre opcional. */
+  themeFilter?: string;
+  /** Título amigável (default: nome do tópico + data). */
+  title?: string;
+}
+
+export interface QuizGenerationProgress {
+  pct: number;
+  status: string;
+}
+
+export interface GenerateQuizResult {
+  quiz: Quiz;
+  /** Quantas perguntas o modelo gerou antes da validação. */
+  totalGenerated: number;
+  /** Quantas sobreviveram à validação. */
+  totalValidated: number;
+  /**
+   * False quando o filtro de tema foi passado mas nenhuma pergunta resultou
+   * (geralmente porque o tema não está no material). UI mostra mensagem
+   * específica nesse caso. Quando false, `quiz` é null.
+   */
+  themeMatched: boolean;
+}
+
+export interface QuizzesApi {
+  /**
+   * Gera um quiz novo: análise → geração → validação → persiste.
+   * Pode demorar ~15-60s. Use `onProgress` pra feedback.
+   */
+  generate(input: GenerateQuizInput): Promise<GenerateQuizResult>;
+  /** Sugere temas baseado no material (botão "Sugerir temas" no QuizSetup). */
+  suggestThemes(sourceIds: string[]): Promise<string[]>;
+  /** Busca quiz pelo id, com perguntas. */
+  get(id: string): Promise<Quiz | null>;
+  /** Lista quizzes de um tópico (ordem decrescente, sem perguntas). */
+  listByTopic(topicId: string): Promise<QuizSummary[]>;
+  /**
+   * Registra resposta do usuário a uma pergunta. Marca isCorrect.
+   * Não atualiza score do quiz — chamar `finish()` quando termina.
+   */
+  answer(questionId: string, selectedIndex: number): Promise<QuizQuestion>;
+  /**
+   * Finaliza o quiz: calcula score, marca completedAt, salva tempo gasto.
+   */
+  finish(quizId: string, timeSpentSeconds: number): Promise<Quiz>;
+  delete(id: string): Promise<void>;
+  /**
+   * "Refazer" o mesmo quiz: limpa as respostas mas mantém as perguntas.
+   * Zero tokens — não chama a API. Usuário responde as mesmas de novo.
+   */
+  reset(id: string): Promise<Quiz>;
+  /** Renomeia só o título do quiz. Outros campos não mudam. */
+  rename(id: string, title: string): Promise<Quiz>;
+  /** Subscribe a eventos de progresso da geração. Retorna cleanup. */
+  onProgress(callback: (event: QuizGenerationProgress) => void): () => void;
 }
 
 /*

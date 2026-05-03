@@ -56,6 +56,27 @@ const api: IpcApi = {
       return () => ipcRenderer.off('embeddings:progress', handler);
     },
   },
+  quizzes: {
+    generate: (input) => ipcRenderer.invoke('quizzes:generate', input),
+    suggestThemes: (sourceIds) => ipcRenderer.invoke('quizzes:suggestThemes', sourceIds),
+    get: (id) => ipcRenderer.invoke('quizzes:get', id),
+    listByTopic: (topicId) => ipcRenderer.invoke('quizzes:listByTopic', topicId),
+    answer: (questionId, selectedIndex) =>
+      ipcRenderer.invoke('quizzes:answer', questionId, selectedIndex),
+    finish: (quizId, timeSpentSeconds) =>
+      ipcRenderer.invoke('quizzes:finish', quizId, timeSpentSeconds),
+    delete: (id) => ipcRenderer.invoke('quizzes:delete', id),
+    reset: (id) => ipcRenderer.invoke('quizzes:reset', id),
+    rename: (id, title) => ipcRenderer.invoke('quizzes:rename', id, title),
+    onProgress: (callback) => {
+      type ProgressData = { pct: number; status: string };
+      const handler = (_event: Electron.IpcRendererEvent, data: ProgressData) => {
+        callback(data);
+      };
+      ipcRenderer.on('quizzes:progress', handler);
+      return () => ipcRenderer.off('quizzes:progress', handler);
+    },
+  },
   setup: {
     downloadModel: () => ipcRenderer.invoke('setup:downloadModel'),
     isModelReady: () => ipcRenderer.invoke('setup:isModelReady'),

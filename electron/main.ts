@@ -9,6 +9,7 @@ import { registerTopicsHandlers } from './ipc/topics.ipc';
 import { registerSourcesHandlers } from './ipc/sources.ipc';
 import { registerFilesHandlers } from './ipc/files.ipc';
 import { registerEmbeddingsHandlers } from './ipc/embeddings.ipc';
+import { registerQuizzesHandlers } from './ipc/quizzes.ipc';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -81,6 +82,7 @@ function registerIpcHandlers(): void {
   registerSourcesHandlers();
   registerFilesHandlers();
   registerEmbeddingsHandlers();
+  registerQuizzesHandlers();
 }
 
 app.whenReady().then(async () => {
