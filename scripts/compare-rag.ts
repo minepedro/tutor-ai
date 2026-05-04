@@ -28,43 +28,44 @@ if (!existsSync(dbPath)) throw new Error(`DB não encontrado: ${dbPath}`);
 if (!existsSync(modelPath)) throw new Error(`Modelo ONNX não encontrado: ${modelPath}`);
 
 async function main() {
-// ───────── Tópico de teste: "fdsfs" (Sistema Toyota de Produção) ──────────────
-const TOPIC_ID = '556768bd-a6cb-402a-a93e-dff40be6c705';
+// ───────── Escopo: subject "gfdgd" (Toyota + Realismo + Pesquisa) ─────────────
+// Mistura de domínios = teste mais robusto. ~1986 chunks ao todo.
+const SUBJECT_ID = 'af4e0553-47ae-4d0e-9a8b-fea29b095b31';
 const TOP_K = 5;
 const RRF_K = 60;
 
-// Queries de teste — mistura proposital de tipos pra exercitar cada engine
-const QUERIES: Array<{ q: string; tag: string; expectation: string }> = [
-  {
-    q: 'Poka Yoke',
-    tag: 'TERMO TÉCNICO LITERAL',
-    expectation: 'FTS deveria dominar (palavra rara, citação literal)',
-  },
-  {
-    q: 'como evitar erros na linha de produção',
-    tag: 'PARAFRASEADO (semântico)',
-    expectation: 'Semantic deveria dominar (deve mapear pra Poka Yoke sem citar)',
-  },
-  {
-    q: 'kanban e just in time',
-    tag: 'TERMOS COMPOSTOS TÉCNICOS',
-    expectation: 'Híbrido: FTS pega kanban literal; semantic pega contexto STP',
-  },
-  {
-    q: 'qual a diferença entre produtividade e eficiência',
-    tag: 'PERGUNTA CONCEITUAL',
-    expectation: 'Semantic deveria achar a aula de Produtividade',
-  },
-  {
-    q: 'Taiichi Ohno',
-    tag: 'NOME PRÓPRIO RARO',
-    expectation: 'FTS deveria achar; semantic pode diluir',
-  },
-  {
-    q: 'sistema toyota de produção',
-    tag: 'TERMO MÚLTIPLO',
-    expectation: 'Os dois deveriam achar — bom controle',
-  },
+// 25 queries variadas cobrindo: termos técnicos, paráfrases, nomes próprios,
+// queries vagas, estruturais, em inglês, em PT, curtas e longas.
+const QUERIES: Array<{ q: string; tag: string }> = [
+  // ── Domínio 1: Toyota / Lean (técnico) ──────────────────────────────────
+  { q: 'Poka Yoke', tag: 'termo técnico literal' },
+  { q: 'como evitar erros na linha de produção', tag: 'paráfrase conceitual' },
+  { q: 'Sistema Toyota de Produção', tag: 'termo composto comum' },
+  { q: 'Taiichi Ohno', tag: 'nome próprio raro' },
+  { q: 'kaizen', tag: 'termo único japonês' },
+  { q: 'lean manufacturing', tag: 'termo em inglês' },
+  { q: 'balanceamento de linha de montagem', tag: 'termo composto técnico' },
+  { q: 'sete tipos de desperdício', tag: 'enumeração' },
+  { q: 'qual a diferença entre produtividade e eficiência', tag: 'pergunta conceitual' },
+  // ── Domínio 2: Pesquisa de Mercado ──────────────────────────────────────
+  { q: 'como criar um questionário', tag: 'pergunta procedural' },
+  { q: 'amostragem probabilística', tag: 'termo técnico estatístico' },
+  // ── Domínio 3: Realismo (livro literário) ───────────────────────────────
+  { q: 'naturalismo', tag: 'escola literária' },
+  { q: 'Eça de Queirós', tag: 'nome próprio autor' },
+  { q: 'crítica social na literatura', tag: 'conceito amplo' },
+  { q: 'personagem feminina', tag: 'análise narrativa' },
+  { q: 'século XIX', tag: 'marco temporal' },
+  { q: 'Machado de Assis', tag: 'nome próprio brasileiro' },
+  { q: 'Zola', tag: 'só sobrenome' },
+  { q: 'narrador onisciente', tag: 'teoria literária' },
+  { q: 'descrição da paisagem urbana', tag: 'descrição literária' },
+  // ── Edge cases ──────────────────────────────────────────────────────────
+  { q: 'exercício 1', tag: 'estrutural numerado' },
+  { q: 'introdução', tag: 'palavra muito comum' },
+  { q: 'como funciona', tag: 'query vaga' },
+  { q: 'qual o tema principal', tag: 'pergunta aberta' },
+  { q: 'PHP', tag: 'OFF-TOPIC (controle negativo)' },
 ];
 
 // ───────── DB + LanceDB ───────────────────────────────────────────────────────
@@ -93,13 +94,19 @@ if (chunksCount > 0 && ftsCount === 0) {
   );
 }
 
+// Resolve subject → topics → sources (escopo mais largo)
 const sourceRows = db
-  .prepare(`SELECT id, filename FROM sources WHERE topic_id = ?`)
-  .all(TOPIC_ID) as Array<{ id: string; filename: string }>;
+  .prepare(
+    `SELECT s.id, s.filename
+     FROM sources s
+     JOIN topics t ON t.id = s.topic_id
+     WHERE t.subject_id = ?`,
+  )
+  .all(SUBJECT_ID) as unknown as Array<{ id: string; filename: string }>;
 const sourceIds = sourceRows.map((s) => s.id);
 const filenameById = new Map(sourceRows.map((s) => [s.id, s.filename]));
 
-console.log(`📂 Tópico tem ${sourceIds.length} sources`);
+console.log(`📂 Subject tem ${sourceIds.length} sources`);
 
 const lance = await lancedb.connect(lanceDbPath);
 const chunksTable = await lance.openTable('chunks');
@@ -250,41 +257,141 @@ function snippet(text: string): string {
   return text.replace(/\s+/g, ' ').slice(0, 100).trim();
 }
 
-let report = `# RAG Comparison — v0.5 (semantic) vs v0.6 (hybrid RRF)\n\n`;
-report += `**Tópico:** Sistema Toyota de Produção (${sourceIds.length} sources, ${vectors.length} chunks)\n\n`;
-report += `**Top K:** ${TOP_K}  ·  **RRF_K:** ${RRF_K}\n\n---\n\n`;
+// Warm-up: primeira chamada paga overhead de carregamento do modelo. Não conta.
+await embed('warm up');
 
-for (const { q, tag, expectation } of QUERIES) {
+interface QueryStats {
+  q: string;
+  tag: string;
+  semLatencyMs: number;
+  ftsLatencyMs: number;
+  hybLatencyMs: number;
+  semSources: number;
+  ftsSources: number;
+  hybSources: number;
+  overlap: number;
+  semHasFtsTop1: number; // -1 se não tem; senão a posição em sem
+  hybTop1Origin: 'sem-only' | 'fts-only' | 'both';
+  semTop1Distance: number | null;
+  ftsCount: number; // quantos resultados o FTS conseguiu retornar
+}
+
+const stats: QueryStats[] = [];
+let report = `# RAG Comparison — Semantic vs FTS vs Hybrid RRF\n\n`;
+report += `**Escopo:** subject \`${SUBJECT_ID.slice(0, 8)}…\` — ${sourceIds.length} sources, ${vectors.length} chunks\n\n`;
+report += `**Queries:** ${QUERIES.length}  ·  **Top K:** ${TOP_K}  ·  **RRF_K:** ${RRF_K}\n\n---\n\n`;
+
+for (const { q, tag } of QUERIES) {
   console.log(`▶ ${q}`);
+
+  const t0 = performance.now();
   const sem = await semanticSearch(q, TOP_K);
+  const t1 = performance.now();
   const fts = ftsSearch(q, TOP_K);
+  const t2 = performance.now();
   const hyb = rrf(sem, fts, TOP_K);
+  const t3 = performance.now();
+
+  const semIds = new Set(sem.map((s) => s.id));
+  const ftsIds = new Set(fts.map((f) => f.id));
+  const overlap = [...semIds].filter((id) => ftsIds.has(id)).length;
+
+  const ftsTop1Id = fts[0]?.id;
+  const semHasFtsTop1 = ftsTop1Id
+    ? sem.findIndex((s) => s.id === ftsTop1Id)
+    : -1;
+
+  const hybTop1Id = hyb[0]?.item.id;
+  const hybTop1Origin: QueryStats['hybTop1Origin'] = !hybTop1Id
+    ? 'sem-only'
+    : semIds.has(hybTop1Id) && ftsIds.has(hybTop1Id)
+      ? 'both'
+      : ftsIds.has(hybTop1Id)
+        ? 'fts-only'
+        : 'sem-only';
+
+  stats.push({
+    q,
+    tag,
+    semLatencyMs: t1 - t0,
+    ftsLatencyMs: t2 - t1,
+    hybLatencyMs: t3 - t0,
+    semSources: new Set(sem.map((s) => s.source_id)).size,
+    ftsSources: new Set(fts.map((s) => s.source_id)).size,
+    hybSources: new Set(hyb.map((s) => s.item.source_id)).size,
+    overlap,
+    semHasFtsTop1,
+    hybTop1Origin,
+    semTop1Distance: sem[0]?.distance ?? null,
+    ftsCount: fts.length,
+  });
 
   report += `## "${q}"\n\n`;
-  report += `**Tipo:** ${tag}  ·  **Hipótese:** ${expectation}\n\n`;
-  report += `### Semantic only (v0.5)\n`;
+  report += `**Tipo:** ${tag}  ·  **Latência:** sem ${(t1 - t0).toFixed(0)}ms · fts ${(t2 - t1).toFixed(1)}ms\n\n`;
+  report += `### Semantic only\n`;
   if (sem.length === 0) report += `_sem resultados_\n\n`;
   for (const [i, r] of sem.entries()) {
-    report += `${i + 1}. **${shortFile(r.source_id)}** (p.${r.page_number ?? '?'}) · dist=${r.distance.toFixed(3)}\n   > ${snippet(r.content)}\n`;
+    report += `${i + 1}. **${shortFile(r.source_id)}** · dist=${r.distance.toFixed(3)}\n   > ${snippet(r.content)}\n`;
   }
   report += `\n### FTS only\n`;
   if (fts.length === 0) report += `_sem resultados_\n\n`;
   for (const [i, r] of fts.entries()) {
-    report += `${i + 1}. **${shortFile(r.source_id)}** (p.${r.page_number ?? '?'}) · bm25=${r.fts_rank.toFixed(2)}\n   > ${snippet(r.content)}\n`;
+    report += `${i + 1}. **${shortFile(r.source_id)}** · bm25=${r.fts_rank.toFixed(2)}\n   > ${snippet(r.content)}\n`;
   }
-  report += `\n### Hybrid RRF (v0.6)\n`;
+  report += `\n### Hybrid RRF\n`;
   for (const [i, r] of hyb.entries()) {
-    report += `${i + 1}. **${shortFile(r.item.source_id)}** (p.${r.item.page_number ?? '?'}) · rrf=${r.score.toFixed(4)}\n   > ${snippet(r.item.content)}\n`;
+    const inSem = semIds.has(r.item.id);
+    const inFts = ftsIds.has(r.item.id);
+    const origin = inSem && inFts ? '🟢 both' : inFts ? '🔵 fts-only' : '🟡 sem-only';
+    report += `${i + 1}. **${shortFile(r.item.source_id)}** · rrf=${r.score.toFixed(4)} · ${origin}\n   > ${snippet(r.item.content)}\n`;
   }
-
-  // Análise: quantos chunks FTS adicionou que o semantic não tinha
-  const semIds = new Set(sem.map((s) => s.id));
-  const ftsIds = new Set(fts.map((f) => f.id));
-  const onlyFts = [...ftsIds].filter((id) => !semIds.has(id));
-  const onlySem = [...semIds].filter((id) => !ftsIds.has(id));
-  const overlap = [...semIds].filter((id) => ftsIds.has(id));
-  report += `\n**Análise:** overlap=${overlap.length}/${TOP_K}  ·  só-semantic=${onlySem.length}  ·  só-fts=${onlyFts.length}\n\n---\n\n`;
+  report += `\n**Overlap @${TOP_K}:** ${overlap}/${TOP_K}  ·  **FTS top-1 in sem:** ${semHasFtsTop1 === -1 ? 'não está' : `posição ${semHasFtsTop1 + 1}`}  ·  **Hybrid top-1 origin:** ${hybTop1Origin}\n\n---\n\n`;
 }
+
+// ───── Resumo agregado ───────────────────────────────────────────────────
+const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+report += `## Resumo agregado\n\n`;
+report += `### Latência (média sobre ${QUERIES.length} queries)\n\n`;
+report += `| Estratégia | Média (ms) | p50 (ms) |\n`;
+report += `|------------|------------|----------|\n`;
+const sortedSem = [...stats].map((s) => s.semLatencyMs).sort((a, b) => a - b);
+const sortedFts = [...stats].map((s) => s.ftsLatencyMs).sort((a, b) => a - b);
+const sortedHyb = [...stats].map((s) => s.hybLatencyMs).sort((a, b) => a - b);
+report += `| Semantic | ${avg(stats.map((s) => s.semLatencyMs)).toFixed(1)} | ${sortedSem[Math.floor(sortedSem.length / 2)]?.toFixed(1)} |\n`;
+report += `| FTS      | ${avg(stats.map((s) => s.ftsLatencyMs)).toFixed(1)} | ${sortedFts[Math.floor(sortedFts.length / 2)]?.toFixed(1)} |\n`;
+report += `| Hybrid   | ${avg(stats.map((s) => s.hybLatencyMs)).toFixed(1)} | ${sortedHyb[Math.floor(sortedHyb.length / 2)]?.toFixed(1)} |\n\n`;
+
+const overlapDist = stats.reduce<Record<number, number>>((acc, s) => {
+  acc[s.overlap] = (acc[s.overlap] ?? 0) + 1;
+  return acc;
+}, {});
+report += `### Distribuição do overlap (semantic ∩ fts) @${TOP_K}\n\n`;
+report += `| Overlap | # queries |\n|---|---|\n`;
+for (let i = 0; i <= TOP_K; i++) {
+  report += `| ${i}/${TOP_K} | ${overlapDist[i] ?? 0} |\n`;
+}
+report += `\n*overlap = quantos chunks aparecem nos dois top-${TOP_K}. Baixo overlap = engines vendo coisas diferentes (RRF agrega valor). Alto = engines redundantes.*\n\n`;
+
+const hybOriginCount = stats.reduce<Record<string, number>>((acc, s) => {
+  acc[s.hybTop1Origin] = (acc[s.hybTop1Origin] ?? 0) + 1;
+  return acc;
+}, {});
+report += `### Origem do top-1 do híbrido\n\n`;
+report += `| Origem | # queries | Significado |\n|---|---|---|\n`;
+report += `| both | ${hybOriginCount['both'] ?? 0} | top-1 está em ambos rankings (consenso) |\n`;
+report += `| sem-only | ${hybOriginCount['sem-only'] ?? 0} | semantic empurrou — semantic suficiente |\n`;
+report += `| fts-only | ${hybOriginCount['fts-only'] ?? 0} | FTS empurrou — sem FTS, top-1 era diferente |\n\n`;
+
+const ftsZero = stats.filter((s) => s.ftsCount === 0).length;
+report += `### Robustez\n\n`;
+report += `- Queries onde FTS retornou 0 resultados: **${ftsZero}/${QUERIES.length}**\n`;
+report += `- Queries onde FTS top-1 NÃO estava no top-${TOP_K} do semantic: **${stats.filter((s) => s.ftsCount > 0 && s.semHasFtsTop1 === -1).length}/${QUERIES.length}**\n`;
+report += `  *(estes são os casos onde FTS adicionou valor real ao top-K)*\n\n`;
+report += `### Diversidade de sources no top-${TOP_K}\n\n`;
+report += `| Estratégia | Média de sources únicos |\n|---|---|\n`;
+report += `| Semantic | ${avg(stats.map((s) => s.semSources)).toFixed(2)} |\n`;
+report += `| FTS      | ${avg(stats.map((s) => s.ftsSources)).toFixed(2)} |\n`;
+report += `| Hybrid   | ${avg(stats.map((s) => s.hybSources)).toFixed(2)} |\n\n`;
 
 const reportPath = join(__dirname, 'compare-rag.report.md');
 writeFileSync(reportPath, report, 'utf8');
