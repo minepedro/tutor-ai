@@ -10,11 +10,89 @@ Lugar único pra "o que falta fazer" que não está no roadmap atual ([TODO.md](
 
 Itens priorizados — atacar antes de v0.6.0:
 
+- [ ] **🐛 Markdown/LaTeX rendering no chat (v0.5.1)** — chat hoje mostra markdown cru: `**negrito**`, `# títulos`, `$$LaTeX$$`, tabelas, blocos de código. Bug visível em qualquer resposta de quiz com fórmulas. **Solução:** instalar `react-markdown` + `remark-math` + `rehype-katex` + `katex` (~250KB total). Substituir split manual em `ChatMessage` por `<ReactMarkdown>` com plugins. Padrão da indústria. ~20 min de trabalho.
+
 - [ ] **Filtro estrutural no RAG** — quando query menciona "exercício 5" / "capítulo 3", aplicar filtro `structural_label = X` ANTES (ou em paralelo) à busca semântica. v0.5.0 detectou e indexou os labels; agora falta usar pra filtrar. Implementação: regex no rewriter pra extrair label da query → passa como predicado SQL no `getChunksByIds`. Resolve definitivamente "exercício 5" → traz só o exercício 5.
 
 - [ ] **Full-text search complementando vetorial** — SQLite tem FTS5 builtin. Indexar `content` dos chunks. Na busca: paralelo (vetorial + FTS), merge dos resultados com pesos. Resolve "cite palavra rara" (FTS pega substring) sem perder semântica (vetor capta sinônimos).
 
 - [ ] **OCR pra PDFs escaneados** — integrar `tesseract.js` (~30MB binário) quando `extractPdfText` retornar < 300 chars. Idealmente OCR só nos primeiros chars pra confirmar que é imagem antes de processar tudo. Suporte multilíngue (PT-BR + EN) na config.
+
+## 🚀 Roadmap das próximas grandes features
+
+Pensadas em sessão 2026-05-04. Estimativas e propostas de UX detalhadas.
+
+### v0.7.0 — Chat inline no quiz
+
+Permitir o aluno tirar dúvidas sobre cada pergunta do quiz sem sair da tela.
+
+**Estado:** schema **já suporta** (`quiz_questions` tem `doubt_question` e `doubt_response` desde v0.1). Falta só backend handler + UI.
+
+**UX proposta:**
+- Cada `QuizCard` ganha um botão contextual baseado no estado:
+  - **Antes de responder:** `💡 Pedir dica` — IA dá pista sócratica sem entregar a resposta
+  - **Após responder certo:** `🤔 Aprofundar` — explicação extra, conexões, casos similares
+  - **Após responder errado:** `📚 Entender o erro` — diálogo guiado com perguntas que ajudam o aluno a chegar na resposta sozinho
+- Click abre mini-chat dentro do card (ou drawer pequeno lateral)
+- Histórico salvo na pergunta → ao voltar, vê dúvidas anteriores
+- Multi-turn (várias trocas) → schema atual aceita 1 par; refactor leve pra criar tabela `quiz_question_messages` muitos-pra-1
+
+**Contexto que vai pro Claude:** pergunta + 4 opções + correta + explicação + (se respondeu) escolha + última dúvida + nova pergunta.
+
+**Custo estimado:** 1 sessão. Backend: novo handler `quizzes:askDoubt`. UI: extensão do QuizCard.
+
+### v0.8.0 — Sidebar redesign + Chat fullscreen
+
+Reorganização completa da navegação. Hoje o sidebar é minimalista (Início + Configurações). Conforme app cresce, vira gargalo.
+
+**Proposta A — "Notion-style" (recomendada)**
+
+```
+🎓 tutor.ai
+├─ 🏠 Início (dashboard com stats)
+├─ 💬 Chat (tela cheia, ver abaixo)
+├─ 📚 Matérias
+│   ├─ Cálculo II
+│   │   ├─ Derivadas
+│   │   └─ Integrais
+│   ├─ História da Arte
+│   └─ + Nova matéria
+├─ 🎯 Atividades
+│   ├─ Quizzes (lista global, todos os tópicos)
+│   ├─ Flashcards (futuro)
+│   └─ Exercícios (futuro)
+└─ ⚙️ Configurações
+```
+
+Vantagens: hierarquia natural pra app de estudo, expansível, familiar (Notion/Obsidian).
+
+**Chat fullscreen (rota `/chat`):**
+
+Layout 3 colunas:
+```
+┌────────────┬──────────────┬─────────────┐
+│ Conversas  │ Mensagens    │ Fontes      │
+│ anteriores │ da conversa  │ (chunks da  │
+│            │              │  resposta)  │
+│ [+ Nova]   │              │             │
+│ Conv 1     │ [input]      │             │
+│ Conv 2     │              │             │
+└────────────┴──────────────┴─────────────┘
+```
+
+Topo da coluna do meio: **seletor de escopo**:
+- Tópico (1)
+- Matéria (1)
+- 🌐 **Global** (todos os PDFs do app) — requer adicionar `scope_type='global'` no schema
+- Multi-seleção (futuro v0.9: requer tabela `conversation_scopes`)
+
+**v0.8.0 entrega:** Notion-style sidebar + Chat fullscreen com escopos Tópico/Matéria/Global. Multi-seleção fica pra depois.
+
+**Custo estimado:** 2-3 sessões. Refactor de `Sidebar`, nova rota `/chat`, ajuste no schema pra `scope_type='global'`, novo mini-componente de seletor de escopo.
+
+### v0.9.0+ — Multi-escopo no chat
+
+Tabela nova `conversation_scopes (conversation_id, scope_type, scope_id)` pra suportar conversas que abrangem múltiplas matérias/tópicos selecionados manualmente. UI: dropdown com checkboxes em árvore (Matéria > Tópicos).
 
 ## Tech Debt
 
