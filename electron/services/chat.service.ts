@@ -12,21 +12,23 @@ import {
   CHAT_TUTOR_SYSTEM_PROMPT,
   buildChatUserPrompt,
 } from './prompts/chat-tutor';
+import { rewriteQueryForRag } from './prompts/query-rewriter';
 
 /*
   Chat service — orquestra o fluxo de uma mensagem:
 
   1. Salva a mensagem do usuário no DB
-  2. Faz RAG: busca top K chunks relevantes
-  3. Carrega histórico (últimas N mensagens, sliding window)
-  4. Monta contexto (system prompt + chunks + histórico + nova msg)
-  5. Chama Claude
-  6. Salva a resposta com lista de chunk_ids usados
-  7. Retorna a resposta + chunks usados pra UI mostrar citações
+  2. Carrega histórico (sliding window) — antes do RAG porque é input do rewriter
+  3. Query rewriting: reescreve a pergunta usando histórico (resolve referências
+     tipo "esse exercício", "anterior") — chamada extra ao Claude (ADR-029)
+  4. RAG: busca top K chunks usando a query reescrita
+  5. Monta user prompt (chunks como contexto + pergunta ORIGINAL do usuário)
+  6. Histórico → messages[] da API + nova msg com contexto RAG
+  7. Chama Claude
+  8. Salva resposta com lista de chunk_ids usados
 
   Sliding window de histórico: 10 mensagens (5 turnos completos user+assistant).
-  Sem resumo automático na v0.4.0 (decisão simples; ADR-022 do quiz tem
-  raciocínio análogo: economia + simplicidade).
+  Sem resumo automático ainda (ADR-027 — anotado em backlog).
 */
 
 const HISTORY_WINDOW_SIZE = 10;
@@ -72,51 +74,56 @@ export async function sendMessage(
   });
 
   try {
-    // 2. RAG: busca chunks relevantes pra essa pergunta
-    const chunks = await searchByQuery(trimmed, scope, TOP_K_CHUNKS);
+    // 2. Histórico (sliding window) — carregado ANTES do RAG porque é input
+    //    pro query rewriter (que precisa do contexto pra resolver referências).
+    //    Já exclui a userMessage que acabou de ser persistida.
+    const historyWithCurrent = getRecentMessages(conversationId, HISTORY_WINDOW_SIZE);
+    const history = historyWithCurrent.filter((m) => m.id !== userMessage.id);
 
-    // 3. Histórico (sliding window)
-    const history = getRecentMessages(conversationId, HISTORY_WINDOW_SIZE);
+    /*
+      3. Query rewriting: reescreve a pergunta usando histórico pra resolver
+      referências (ex: "resolva esse exercício" → "como resolver o exercício
+      de produtividade total..."). Custa +1 chamada API mas resolve perguntas
+      conversacionais que o RAG cru não acerta.
+    */
+    const ragQuery = await rewriteQueryForRag(history, trimmed);
 
-    // 4. Monta o user prompt da chamada (com chunks como contexto). Os trechos
-    //    aparecem como bloco no prompt; o histórico vai como messages[].
+    // 4. RAG: busca chunks relevantes usando a query reescrita
+    const chunks = await searchByQuery(ragQuery, scope, TOP_K_CHUNKS);
+
+    // 5. Monta o user prompt (chunks como contexto + pergunta ORIGINAL do usuário).
+    //    Importante usar a pergunta original aqui, não a reescrita — o Claude
+    //    deve responder ao que o usuário disse, não à versão expandida pra RAG.
     const userPrompt = buildChatUserPrompt(
       chunks.map((c) => ({
         filename: c.sourceFilename,
         chunkIndex: c.chunkIndex,
+        pageNumber: c.pageNumber,
+        structuralLabel: c.structuralLabel,
         content: c.content,
       })),
       trimmed,
     );
 
     /*
-      Histórico → messages[] da Anthropic API. A última `user` message vai
-      ser substituída pelo nosso `userPrompt` enriquecido com chunks
-      (caso contrário o modelo só veria a pergunta do usuário sem contexto
-      RAG nesta volta).
+      6. Histórico → messages[] da API. `history` já não inclui a userMessage
+      atual (filtrada acima), então adicionamos ela aqui com o contexto RAG.
     */
-    const messages = history
-      .filter((m) => m.id !== userMessage.id) // evita duplicata da última msg
-      .map((m) => ({
-        role: m.role as MessageRole,
-        content: m.content,
-      }));
+    const messages = history.map((m) => ({
+      role: m.role as MessageRole,
+      content: m.content,
+    }));
+    messages.push({ role: 'user', content: userPrompt });
 
-    // Adiciona a mensagem atual com o contexto RAG anexado.
-    messages.push({
-      role: 'user',
-      content: userPrompt,
-    });
-
-    // 5. Chama Claude
+    // 7. Chama Claude
     const response = await complete({
       system: CHAT_TUTOR_SYSTEM_PROMPT,
       messages,
       maxTokens: MAX_RESPONSE_TOKENS,
-      temperature: 0.5, // Equilibra fidelidade ao material com naturalidade
+      temperature: 0.5,
     });
 
-    // 6. Persiste resposta com IDs dos chunks usados
+    // 8. Persiste resposta com IDs dos chunks usados
     const assistantMessage = addMessage({
       conversationId,
       role: 'assistant',
