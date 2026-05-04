@@ -378,7 +378,12 @@ export interface QuizzesApi {
   pra v0.5+.
 */
 
-export type ChatScopeType = 'inline' | 'document' | 'topic' | 'subject';
+export type ChatScopeType =
+  | 'inline'
+  | 'document'
+  | 'topic'
+  | 'subject'
+  | 'quiz_question';
 export type ChatMessageRole = 'user' | 'assistant';
 
 export interface ChatScope {
@@ -447,6 +452,13 @@ export interface SendMessageResult {
   chunks: ChatRagChunk[];
 }
 
+export interface QuizDoubtResult {
+  /** Conversation usada (criada lazy se não existia). */
+  conversation: Conversation;
+  userMessage: ChatMessage;
+  assistantMessage: ChatMessage;
+}
+
 export interface ChatApi {
   /** Lista conversas de um escopo (mais recentes primeiro). */
   listConversations(scope: ChatScope): Promise<ConversationSummary[]>;
@@ -466,6 +478,18 @@ export interface ChatApi {
    * streaming na v0.4.0 — ver decisão em ADR (v0.4.1+ pode adicionar).
    */
   sendMessage(conversationId: string, content: string): Promise<SendMessageResult>;
+  /**
+   * Chat inline em pergunta de quiz (v0.7.0). Cria conversation lazy
+   * (1:1 com a pergunta) na primeira chamada. Pipeline mais simples que
+   * `sendMessage`: SEM RAG, SEM rewriter — contexto da pergunta vai no
+   * system prompt e sobrevive ao sliding window.
+   */
+  askQuizDoubt(quizQuestionId: string, content: string): Promise<QuizDoubtResult>;
+  /**
+   * Recupera a conversation de dúvidas de uma pergunta de quiz (com mensagens).
+   * Retorna null se o aluno ainda não abriu o chat dessa pergunta.
+   */
+  getQuizDoubt(quizQuestionId: string): Promise<Conversation | null>;
   rename(id: string, title: string): Promise<Conversation>;
   delete(id: string): Promise<void>;
 }

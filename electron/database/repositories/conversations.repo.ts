@@ -4,10 +4,15 @@ import { getDb } from '../connection';
 /*
   Persistência de conversas + mensagens (chat).
 
-  Cada conversa pertence a um escopo (document | topic | subject | inline).
-  As mensagens dela compartilham o mesmo contexto de busca RAG.
+  Cada conversa pertence a um escopo:
+  - document/topic/subject: chat global com RAG, busca em PDFs do escopo
+  - inline: reservado pra chat futuro embutido em outras telas
+  - quiz_question (v0.7.0): chat inline numa pergunta de quiz; scope_id é
+    quiz_question_id; SEM RAG (contexto = pergunta + alternativas + explicação)
 
-  Schema (já existe desde v0.1.0):
+  As mensagens compartilham o mesmo contexto.
+
+  Schema (`conversations` desde v0.1.0):
   - `conversations`: id, title, scope_type, scope_id, created_at, updated_at
   - `messages`: id, conversation_id, role, content, context_chunks (JSON), created_at
     com ON DELETE CASCADE → apagar conversa apaga mensagens.
@@ -15,10 +20,15 @@ import { getDb } from '../connection';
   💡 Decisão de design: campo `context_chunks` é JSON com a lista de chunk_ids
   usados pra responder. Permite UI mostrar "fontes" e debug. Em v1.0 isso pode
   virar tabela de junção se virar relevante consultar "quais respostas usaram
-  esse chunk".
+  esse chunk". Pra `quiz_question`, este campo fica null (sem RAG).
 */
 
-export type ScopeType = 'inline' | 'document' | 'topic' | 'subject';
+export type ScopeType =
+  | 'inline'
+  | 'document'
+  | 'topic'
+  | 'subject'
+  | 'quiz_question';
 export type MessageRole = 'user' | 'assistant';
 
 export interface Message {
@@ -153,6 +163,26 @@ export function getConversation(id: string): Conversation | null {
     .map(mapMessage);
 
   return mapConversation(row, messages);
+}
+
+/**
+ * Acha a primeira conversa de um escopo. Usado quando um escopo tem
+ * relação 1:1 com a conversa (ex: `quiz_question` — cada pergunta tem
+ * uma conversa de dúvidas, criada lazy).
+ */
+export function findConversationByScope(
+  scopeType: ScopeType,
+  scopeId: string,
+): Conversation | null {
+  const db = getDb();
+  const row = db
+    .prepare<[string, string], { id: string }>(
+      `SELECT id FROM conversations
+       WHERE scope_type = ? AND scope_id = ?
+       ORDER BY created_at ASC LIMIT 1`,
+    )
+    .get(scopeType, scopeId);
+  return row ? getConversation(row.id) : null;
 }
 
 /**

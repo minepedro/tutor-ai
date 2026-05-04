@@ -83,6 +83,10 @@ const api: IpcApi = {
     create: (input) => ipcRenderer.invoke('chat:create', input),
     sendMessage: (conversationId, content) =>
       ipcRenderer.invoke('chat:sendMessage', conversationId, content),
+    askQuizDoubt: (quizQuestionId, content) =>
+      ipcRenderer.invoke('chat:askQuizDoubt', quizQuestionId, content),
+    getQuizDoubt: (quizQuestionId) =>
+      ipcRenderer.invoke('chat:getQuizDoubt', quizQuestionId),
     rename: (id, title) => ipcRenderer.invoke('chat:rename', id, title),
     delete: (id) => ipcRenderer.invoke('chat:delete', id),
   },

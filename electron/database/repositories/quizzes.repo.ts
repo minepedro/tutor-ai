@@ -218,6 +218,23 @@ export function getQuiz(id: string): Quiz | null {
 }
 
 /**
+ * Busca uma pergunta de quiz isolada (sem o resto do quiz). Útil pra contextos
+ * onde só a pergunta + alternativas + explicação importam — ex: chat inline
+ * em pergunta de quiz (v0.7.0).
+ */
+export function getQuizQuestion(id: string): QuizQuestion | null {
+  const row = getDb()
+    .prepare<[string], QuizQuestionRow>(
+      `SELECT id, quiz_id, type, difficulty, question, options, correct_index,
+              selected_index, is_correct, explanation, doubt_question, doubt_response,
+              answered_at
+       FROM quiz_questions WHERE id = ?`,
+    )
+    .get(id);
+  return row ? mapQuestion(row) : null;
+}
+
+/**
  * Lista quizzes de um tópico (sem as perguntas, pra listagem rápida).
  * Se precisar das perguntas, chama getQuiz(id) na sequência.
  */

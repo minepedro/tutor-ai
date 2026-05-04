@@ -7,7 +7,11 @@ import {
   renameConversation,
   type ScopeType,
 } from '../database/repositories/conversations.repo';
-import { sendMessage } from '../services/chat.service';
+import {
+  sendMessage,
+  sendQuizDoubt,
+  getQuizDoubtConversation,
+} from '../services/chat.service';
 import { isObject } from '../utils/type-guards';
 
 /*
@@ -15,12 +19,18 @@ import { isObject } from '../utils/type-guards';
   - chat:listConversations(scope) — lista conversas de um escopo
   - chat:get(id) — busca conversa com mensagens
   - chat:create(input) — nova conversa
-  - chat:sendMessage(conversationId, scope, content) — núcleo: dispara o
-    pipeline RAG + Claude e devolve a resposta
+  - chat:sendMessage(conversationId, content) — chat global: dispara
+    pipeline RAG + Claude e devolve a resposta com chunks usados
+  - chat:askQuizDoubt(quizQuestionId, content) — chat inline em pergunta
+    de quiz (v0.7.0): SEM RAG, contexto = pergunta + explicação
+  - chat:getQuizDoubt(quizQuestionId) — busca conversa de dúvida (null se
+    o aluno ainda não abriu o chat dessa pergunta)
   - chat:rename(id, title) — muda título
   - chat:delete(id) — apaga (cascade nas mensagens)
 */
 
+// Escopos aceitos no handler de listagem genérica. quiz_question fica fora —
+// usa-se chat:getQuizDoubt no lugar (1:1 com a pergunta).
 const VALID_SCOPE_TYPES: ScopeType[] = ['inline', 'document', 'topic', 'subject'];
 
 export function registerChatHandlers(): void {
@@ -61,6 +71,26 @@ export function registerChatHandlers(): void {
       return sendMessage(conversationId, content);
     },
   );
+
+  ipcMain.handle(
+    'chat:askQuizDoubt',
+    async (_event, quizQuestionId: unknown, content: unknown) => {
+      if (typeof quizQuestionId !== 'string' || quizQuestionId.length === 0) {
+        throw new Error('chat:askQuizDoubt exige quizQuestionId (string)');
+      }
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        throw new Error('chat:askQuizDoubt exige content (string não vazia)');
+      }
+      return sendQuizDoubt(quizQuestionId, content);
+    },
+  );
+
+  ipcMain.handle('chat:getQuizDoubt', (_event, quizQuestionId: unknown) => {
+    if (typeof quizQuestionId !== 'string' || quizQuestionId.length === 0) {
+      throw new Error('chat:getQuizDoubt exige quizQuestionId (string)');
+    }
+    return getQuizDoubtConversation(quizQuestionId);
+  });
 
   ipcMain.handle('chat:rename', (_event, id: unknown, title: unknown) => {
     if (typeof id !== 'string') throw new Error('chat:rename exige id (string)');
