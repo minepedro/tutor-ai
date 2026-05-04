@@ -620,10 +620,112 @@ Mesmo princípio do ADR-023 (sem proxy genérico de Claude pra renderer): chat t
 
 ---
 
+## ADR-029: Query rewriting antes do RAG (chamada extra ao Claude)
+Data: 2026-05-04 · Status: ✅ Aceita
+
+### Contexto
+RAG inicial usava só a última mensagem do usuário como query. Perguntas referenciais ("resolva esse exercício", "explica isso", "anterior") confundiam a busca: a query "resolva esse exercício" tem embedding genérico, traz qualquer exercício do material em vez do que estava sendo discutido.
+
+### Decisão
+Antes do RAG, fazer chamada extra ao Claude que reescreve a pergunta usando histórico recente (4 últimas mensagens). A pergunta reescrita é autônoma — exemplo: "resolva esse exercício" + histórico sobre produtividade total → "como calcular produtividade total com input R$ 66M e output 1.4M toneladas?".
+
+Heurísticas pra economizar API calls:
+- Histórico vazio (1ª pergunta) → skip rewrite
+- Query <5 chars → skip
+- Query >250 chars → skip (provavelmente já é específica)
+
+### Alternativas consideradas
+- **Concatenar histórico no embedding** — naive, perde foco da pergunta atual.
+- **Multi-query (gera N queries paralelas, faz busca em cada)** — mais robusto mas custo proporcional a N. Overkill pra v0.5.
+- **Manter sem rewrite** — UX ruim em conversa real.
+
+### Consequências
++ Conversação natural funciona (referências resolvidas)
++ Logs no terminal mostram "rewrote: X → Y" pra debug
+- +1 chamada API por turno (~$0.001 — input ~500 tokens, output ~50)
+- +1-2s latência por turno
+
+---
+
+## ADR-030: Page numbers via `pdf-parse` pagerender callback
+Data: 2026-05-04 · Status: ✅ Aceita
+
+### Contexto
+v0.4.0 e antes guardava `page_number` como NULL em todos os chunks. RAG citava "chunk 26" em vez de "página 14" — pouco útil pro usuário que quer abrir o PDF original.
+
+### Decisão
+- `pdf-parser.ts` agora usa o callback `pagerender` do `pdf-parse` pra capturar texto por página em `pages: string[]`
+- `text-chunker.ts` ganha `chunkPages(pages)` que gera chunks por página (chunks NUNCA cruzam fronteira de página)
+- Cada chunk carrega `pageNumber: number | null` (1-based)
+- Schema `document_chunks.page_number` agora é populado
+- Prompt e UI usam página real ("página 14") quando disponível, fallback pra "chunk N" pra PDFs ingeridos antes da v0.5.
+
+### Alternativas consideradas
+- **pdfjs-dist direto** — mais controle mas refactor grande. Não vale o ganho.
+- **Inferir página por offset no texto bruto** — frágil; tabelas/colunas confundem.
+
+### Consequências
++ Citações mais úteis pro usuário
++ Trade-off: chunks que cruzariam página viram 2 chunks separados (aceitável; página é unidade lógica)
+- PDFs antigos (sem reprocessar) continuam com `page_number = NULL` — UI cai em fallback
+
+---
+
+## ADR-031: Estrutura detectada via regex (Exercício N, Capítulo N, etc)
+Data: 2026-05-04 · Status: ✅ Aceita
+
+### Contexto
+RAG baseado só em similaridade semântica não acerta perguntas posicionais ("qual o exercício 5?"). O número não tem peso pro embedding.
+
+### Decisão
+- `electron/utils/structure-detector.ts` aplica regex no início de cada chunk pra detectar labels: "Exercício N", "Capítulo N", "Seção N", "Exemplo N", "Questão N", "Problema N", "Aula N", "Unidade N" (PT-BR + EN)
+- Cada chunk ganha `structuralLabel: string | null`
+- Schema migration leve: ALTER TABLE `document_chunks ADD COLUMN structural_label TEXT` quando DB existente não tem
+- Prompt do chat-tutor inclui label nos trechos: `(Fonte: "X.pdf", página 5, exercício 3)`
+- UI mostra chip 🟣 com o label na expansão de fontes
+
+### Alternativas consideradas
+- **Filtro estrutural ANTES do embedding** — usuário pergunta "exercício 5" → busca filtrada apenas em chunks com `structural_label = "exercício 5"`. Mais preciso mas requer parser de query estrutural. Anotado em backlog.
+- **NLP estruturado (extrair seções via modelo dedicado)** — overkill pra v0.5.
+
+### Consequências
++ IA pode citar "Exercício 5 (página 8)" em vez de "chunk 26"
++ Filtro estrutural na próxima sprint usa esse campo
++ Cobertura ampla de patterns acadêmicos PT/EN
+- Detector é heurístico — falsos positivos possíveis ("Exercício de respiração..."). Aceitável; o pior caso é label errado (não bloqueante).
+
+---
+
+## ADR-032: Schema migrations leves no boot (sem framework dedicado)
+Data: 2026-05-04 · Status: ✅ Aceita
+
+### Contexto
+v0.5.0 traz a 1ª mudança de schema (adicionar `structural_label`). `CREATE TABLE IF NOT EXISTS` não atualiza colunas em tabelas existentes — DB criado em <0.5 não teria a coluna.
+
+### Decisão
+Função `applyMigrations(db)` em `connection.ts` roda no boot:
+1. Lê `PRAGMA table_info(<tabela>)` pra checar quais colunas existem
+2. Se faltar coluna nova, executa `ALTER TABLE ADD COLUMN`
+3. Idempotente: rodar 2x não dá erro
+
+Sem framework (umzug, knex). Quando atingir ~3 migrations, trocar.
+
+### Alternativas consideradas
+- **umzug com tabela `schema_versions`** — overkill pra 1ª migration.
+- **Forçar reset (clearAll)** — péssima UX, perde dados do usuário.
+
+### Consequências
++ DB de versões antigas atualiza automaticamente
++ Implementação trivial (~10 linhas)
+- Não rastreia "qual migration foi aplicada" — basta a checagem por coluna
+- Rever quando virar mais complexo
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-029)
+1. Próximo número (ADR-033)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta

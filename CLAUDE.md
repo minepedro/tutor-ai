@@ -1,8 +1,8 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.4.0 (Chat com RAG)** publicada. Próximo: **v0.5.0** — features priorizadas no [BACKLOG](docs/BACKLOG.md): query rewriting (RAG conversacional), page numbers nos chunks, estrutura detectada (exercício N), full-text search, OCR.
-Última sessão: 2026-05-03
+**v0.5.0 (RAG enhancements)** publicada. Próximo: **v0.6.0** — filtro estrutural no RAG (usar `structural_label` pra filtrar), full-text search (SQLite FTS5), OCR (tesseract.js). Ver [BACKLOG](docs/BACKLOG.md).
+Última sessão: 2026-05-04
 
 ## O que é este projeto
 Desktop app open source de estudo com IA. Usuário sobe PDFs, app gera quizzes/flashcards/exercícios e responde dúvidas baseado **no material dele** (RAG local). Tudo roda offline; só chamada externa é à API Anthropic.

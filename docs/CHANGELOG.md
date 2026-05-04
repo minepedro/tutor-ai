@@ -4,6 +4,27 @@ Releases em ordem reversa.
 
 ---
 
+## v0.5.0 (2026-05-04) — RAG enhancements
+
+### Adicionado
+- **Query rewriting** (RAG conversacional): perguntas referenciais como "resolva esse exercício" ou "explica isso" agora funcionam. Antes do RAG, uma chamada extra ao Claude reescreve a pergunta usando histórico recente. Ver [ADR-029](DECISIONS.md#adr-029).
+- **Page numbers nos chunks**: pdf-parse agora extrai texto por página via callback `pagerender`. Cada chunk carrega `pageNumber` (1-based) e a UI/IA cita "página 14" em vez de "chunk 26". Ver [ADR-030](DECISIONS.md#adr-030).
+- **Estrutura detectada**: novo `structure-detector.ts` aplica regex pra reconhecer "Exercício N", "Capítulo N", "Seção N", "Exemplo N", "Questão N", "Problema N", "Aula N", "Unidade N" (PT-BR + EN). Cada chunk ganha `structuralLabel`; UI mostra como chip 🟣 ao lado da fonte; prompt inclui no contexto. Ver [ADR-031](DECISIONS.md#adr-031).
+- **Schema migrations leves**: `applyMigrations(db)` no boot roda `ALTER TABLE ADD COLUMN` quando necessário, baseado em `PRAGMA table_info`. Idempotente, sem framework. Ver [ADR-032](DECISIONS.md#adr-032).
+
+### Mudado
+- `text-chunker.ts`: nova API `chunkPages(pages)` substitui `chunkText(text)` no pipeline (chunks nunca cruzam fronteira de página). `chunkText` mantido pra retrocompat.
+- Prompt do chat-tutor instrui IA a citar página + label estrutural quando disponíveis.
+
+### Corrigido
+- Botão flutuante 💬 cobria conteúdo no fim do scroll (lista de quizzes anteriores, etc). Adicionado `pb-24` (96px) nas páginas com listas longas.
+
+### Caveats conhecidos
+- PDFs ingeridos em versões anteriores ficam com `pageNumber` e `structuralLabel` NULL. Pra ter os benefícios, **delete e re-suba** os PDFs.
+- Sem filtro estrutural ainda ("exercício 5" busca via embedding, não via filtro `structural_label = "exercício 5"`). Anotado no backlog como próximo passo natural.
+
+---
+
 ## v0.4.0 (2026-05-03) — Chat com RAG
 
 ### Adicionado

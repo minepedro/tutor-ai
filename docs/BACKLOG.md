@@ -8,13 +8,9 @@ Lugar único pra "o que falta fazer" que não está no roadmap atual ([TODO.md](
 
 ## 🔥 Próxima sprint (alta prioridade)
 
-Itens priorizados em 2026-05-03 — atacar antes de v0.5.0:
+Itens priorizados — atacar antes de v0.6.0:
 
-- [ ] **Query rewriting no chat (RAG conversacional)** — hoje a query do RAG é só a última msg do usuário. Perguntas referenciais ("resolva esse exercício", "explica isso", "anterior") confundem o RAG porque ele não vê histórico. **Solução:** chamada extra ao Claude antes do RAG que reescreve a pergunta usando histórico — transforma "resolva esse exercício" em "como resolver o exercício de produtividade total com input R$ 66M…". +1 chamada/turno (~$0.001), +1-2s latência. ~30 linhas em `chat.service.ts`. **Crítico pra UX de chat conversacional.**
-
-- [ ] **Page numbers nos chunks** — `pdf-parse` permite extrair com info de página via callback `pagerender`. Refactor médio em [electron/utils/pdf-parser.ts](../electron/utils/pdf-parser.ts) (mudar API pra retornar `{ text, pageCount, pageTextMap }`) + ajustar text-chunker pra propagar page no chunk + preencher `page_number` em `document_chunks` durante ingestão. Bonus: IA cita "página 14" em vez de "chunk 26"; UI mostra link clicável que abre PDF na página.
-
-- [ ] **Estrutura detectada** — parser regex/heurístico em cima do texto extraído pra identificar "Exercício N", "Capítulo N", "Seção N", "Pergunta N". Cada chunk ganha tag estrutural (campo novo `structural_label` em document_chunks). Quando query menciona "exercício 5", aplica filtro estrutural ANTES da busca semântica. Resolve o caso "RAG não acerta numeração".
+- [ ] **Filtro estrutural no RAG** — quando query menciona "exercício 5" / "capítulo 3", aplicar filtro `structural_label = X` ANTES (ou em paralelo) à busca semântica. v0.5.0 detectou e indexou os labels; agora falta usar pra filtrar. Implementação: regex no rewriter pra extrair label da query → passa como predicado SQL no `getChunksByIds`. Resolve definitivamente "exercício 5" → traz só o exercício 5.
 
 - [ ] **Full-text search complementando vetorial** — SQLite tem FTS5 builtin. Indexar `content` dos chunks. Na busca: paralelo (vetorial + FTS), merge dos resultados com pesos. Resolve "cite palavra rara" (FTS pega substring) sem perder semântica (vetor capta sinônimos).
 
