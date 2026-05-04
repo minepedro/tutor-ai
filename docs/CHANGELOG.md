@@ -4,6 +4,33 @@ Releases em ordem reversa.
 
 ---
 
+## v0.7.0 (2026-05-04) — Chat inline em pergunta de quiz
+
+### Adicionado
+- **Chat inline em cada pergunta de quiz**: botão 💬 "Tirar dúvida" no card da pergunta (durante quiz e em revisão de resultados). Abre área expansível com mini-chat.
+- **Multi-turn nativo**: aluno pode fazer várias perguntas seguidas, IA lembra do contexto da troca anterior. Reusa toda a infra do chat global (`conversations` + `messages` + sliding window). Ver [ADR-035](DECISIONS.md#adr-035).
+- **System prompt sócrático contextual**: tom adapta ao estado do aluno. Antes de marcar resposta = sócrático (não entrega resposta, faz perguntas guiadas). Após acertar = aprofundar conceitos. Após errar = diagnosticar erro com perguntas. Implementado via `buildQuizTutorSystemPrompt(ctx)` que injeta a pergunta+alternativas+correta+explicação+estado em toda chamada ao Claude (sobrevive ao sliding window). Ver [ADR-036](DECISIONS.md#adr-036).
+- **Persistência por pergunta**: cada pergunta de quiz tem sua própria conversation (lazy create). Aluno volta dias depois e vê as dúvidas anteriores.
+- **Optimistic UI**: pergunta do aluno aparece imediatamente + indicador "digitando…" enquanto Claude responde.
+- **Sliding window 10 → 20 mensagens** no chat global e inline. Cobre conversas mais longas sem perder contexto. Ver [ADR-037](DECISIONS.md#adr-037).
+
+### Arquitetura
+- Novo enum value `'quiz_question'` em `ScopeType` (não exige migration SQL — SQLite não valida).
+- Novo método `findConversationByScope(scopeType, scopeId)` em `conversations.repo.ts` pra recuperação 1:1.
+- Pipeline `sendQuizDoubt` em `chat.service.ts` (separado de `sendMessage`): pula rewriter+RAG, injeta contexto via system prompt.
+- 2 IPC handlers novos: `chat:askQuizDoubt` + `chat:getQuizDoubt`.
+- Novo componente `QuizDoubtChat` reusa `ChatMessage` (markdown/LaTeX) e `ChatInput` do chat global.
+- Novo arquivo `electron/services/prompts/quiz-tutor.ts` com system prompt + builder do contexto.
+
+### Adiado pra v0.7+
+- **RAG no chat de quiz inline**: hoje a IA vê só a pergunta+explicação. Pra dúvidas tangenciais ("isso aparece no capítulo X?"), ela admite limite e sugere o chat global. Caminho: adicionar busca vetorial restrita à `source_id` da pergunta. Latência sobe ~1.5-2s. Anotado no [BACKLOG](BACKLOG.md).
+- **RAG memory + agentic memory**: pra conversas muito longas e memória entre sessões. Backlog.
+
+### Caveats conhecidos
+- Schema antigo (`quiz_questions.doubt_question`, `doubt_response`) fica como **dead columns**. Não populado pelo novo fluxo. Removível em migration futura.
+
+---
+
 ## v0.6.1 (2026-05-04) — Fix backfill FTS5
 
 ### Corrigido

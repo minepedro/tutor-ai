@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.6.1 (fix backfill FTS5)** publicada — fix crítico do backfill FTS em DBs pré-v0.6 (rebuild correto via `INSERT INTO fts(fts) VALUES('rebuild')`). v0.6.0 entregou RAG híbrido (filtro estrutural + FTS5 + RRF). OCR adiado pra v0.7+. Próximo: **v0.7.0** (chat inline no quiz) e **v0.8.0** (sidebar redesign + chat fullscreen). Ver [BACKLOG](docs/BACKLOG.md).
+**v0.7.0 (chat inline em pergunta de quiz)** publicada — botão "Tirar dúvida" em cada pergunta com multi-turn (reusa `conversations`+`messages`), system prompt sócrático contextual, sliding window 10→20. v0.6.1 corrigiu backfill FTS5 em DBs pré-v0.6. v0.6.0 entregou RAG híbrido. Próximo: **v0.8.0** (sidebar redesign + chat fullscreen). RAG no quiz inline e OCR adiados. Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-04
 
 ## O que é este projeto

@@ -47,25 +47,6 @@ Lugar único pra "o que falta fazer" que não está no roadmap atual ([TODO.md](
 
 Pensadas em sessão 2026-05-04. Estimativas e propostas de UX detalhadas.
 
-### v0.7.0 — Chat inline no quiz
-
-Permitir o aluno tirar dúvidas sobre cada pergunta do quiz sem sair da tela.
-
-**Estado:** schema **já suporta** (`quiz_questions` tem `doubt_question` e `doubt_response` desde v0.1). Falta só backend handler + UI.
-
-**UX proposta:**
-- Cada `QuizCard` ganha um botão contextual baseado no estado:
-  - **Antes de responder:** `💡 Pedir dica` — IA dá pista sócratica sem entregar a resposta
-  - **Após responder certo:** `🤔 Aprofundar` — explicação extra, conexões, casos similares
-  - **Após responder errado:** `📚 Entender o erro` — diálogo guiado com perguntas que ajudam o aluno a chegar na resposta sozinho
-- Click abre mini-chat dentro do card (ou drawer pequeno lateral)
-- Histórico salvo na pergunta → ao voltar, vê dúvidas anteriores
-- Multi-turn (várias trocas) → schema atual aceita 1 par; refactor leve pra criar tabela `quiz_question_messages` muitos-pra-1
-
-**Contexto que vai pro Claude:** pergunta + 4 opções + correta + explicação + (se respondeu) escolha + última dúvida + nova pergunta.
-
-**Custo estimado:** 1 sessão. Backend: novo handler `quizzes:askDoubt`. UI: extensão do QuizCard.
-
 ### v0.8.0 — Sidebar redesign + Chat fullscreen
 
 Reorganização completa da navegação. Hoje o sidebar é minimalista (Início + Configurações). Conforme app cresce, vira gargalo.
@@ -130,8 +111,11 @@ Tabela nova `conversation_scopes (conversation_id, scope_type, scope_id)` pra su
 
 ## Features adiadas
 
+- [ ] **RAG no chat inline do quiz** — v0.7.0 entrega chat sem RAG (contexto = pergunta + alternativas + explicação). Quando o aluno fizer perguntas tangenciais ("como isso aparece no capítulo X do livro?"), a IA não tem como olhar o material. Caminho: adicionar opção 3b — busca vetorial restrita à `source_id` que originou a pergunta do quiz. Latência sobe de ~1.5s pra ~3-4s. Avaliar baseado em uso real.
+- [ ] **RAG memory (vector memory sobre conversas)** — pra conversas longas (>50 mensagens), embed cada mensagem antiga e fazer RAG sobre o histórico. Quando a query atual referenciar contexto distante, busca semântica recupera as msgs relevantes. Concorrência com sliding window: combinar (sliding window cobre recente, RAG cobre distante). Frameworks tipo Mem0, Zep. Não-prioridade.
+- [ ] **Memória estruturada / agentic** — extrair fatos sobre o usuário ("Pedro estuda Sistema Toyota", "tem dificuldade com regra do produto") e persistir entre **sessões diferentes**. Conceito da feature "Memory" do ChatGPT/Claude.ai. Vai além do escopo de uma conversa. Frameworks: Letta, MemGPT, LangGraph memory. Não-prioridade — só vira útil quando o app for usado dia a dia por meses.
 - [ ] **Escopo "global" no chat** — opção de criar conversa que busca em TODOS os PDFs do app, não só do tópico/matéria atual. UI: ao criar nova conversa, dropdown "buscar em: este tópico / esta matéria / todos os materiais". Schema: `scope_type = 'global'` ou similar. Ajusta `rag.service.ts` pra ignorar filtro de source quando global.
-- [ ] **Memória do chat: sliding window maior + resumo automático** — hoje 10 msgs sem resumo. v0.4.1+: aumentar pra 20 e adicionar resumo das mais antigas em parágrafo único. Ou memória vetorial (embeddings de mensagens antigas).
+- [ ] **Memória do chat: sliding window maior + resumo automático** — hoje 20 msgs sem resumo. Próximo passo: rolling summary (resumo das mais antigas em parágrafo único). Ver também "RAG memory" acima.
 - [ ] **Streaming de resposta no chat** — UX melhor (cada token aparece em vez de spinner). Requer event-based IPC (igual progresso de embeddings). v0.4.1+ se UX virar dor.
 - [ ] **Modo "quick" no quiz (1 chamada em vez de 3)** — pular validação na geração. ~30% economia de tokens, qualidade um pouco menor. Adicionar como toggle "Modo rápido" no QuizSetup. Reavaliar baseado em feedback de uso.
 - [ ] **Validação em modelo mais barato (Haiku 4.5)** — etapa 3 (validação) é mais simples, Haiku resolve. ~80% mais barato pra essa etapa específica. Requer mexer em `claude.service.ts` pra aceitar `model` por chamada.

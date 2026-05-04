@@ -788,10 +788,88 @@ FTS resolve isso (BM25 prioriza match léxico raro), mas FTS sozinho perde queri
 
 ---
 
+## ADR-035: Chat inline em pergunta de quiz reusa `conversations`+`messages`
+Data: 2026-05-04 · Status: ✅ Aceita
+
+### Contexto
+v0.7.0 introduz chat inline em cada pergunta de quiz — aluno tira dúvidas sem sair da tela. Schema da v0.1 já tinha `quiz_questions.doubt_question` e `doubt_response` (suficiente pra 1 par pergunta/resposta), mas multi-turn é a UX que faz sentido pra estudo (1ª resposta gera 2ª dúvida).
+
+### Decisão
+Não criar tabela nova (`quiz_question_messages`). Em vez disso, **reusar a tabela `conversations` + `messages`** que já implementa multi-turn com sliding window:
+
+1. Adicionar `'quiz_question'` ao enum `ScopeType`. Cada pergunta de quiz vira uma `conversation` (1:1) com `scope_id = quiz_question_id`.
+2. Mensagens vão pra tabela `messages` que já existe — multi-turn nativo.
+3. Helper `findConversationByScope(type, id)` recupera ou retorna null (criação lazy na 1ª dúvida).
+4. Pipeline customizado em `chat.service.ts` (`sendQuizDoubt`): pula rewriter+RAG, injeta contexto da pergunta no system prompt.
+
+Schema atual (`doubt_question`, `doubt_response`) fica como **legacy** — não removido pra não exigir migration, mas não populado pelo novo fluxo.
+
+### Alternativas consideradas
+- **Usar só `doubt_question`/`doubt_response` (1 par)** — fácil, mas multi-turn é a UX certa pra estudo. Aluno raramente entende com 1 troca.
+- **Tabela nova `quiz_question_messages` (FK pra quiz_questions)** — semanticamente mais limpa, mas duplica infra (sliding window, persistência, optimistic UI) que já existe em `messages`.
+- **Conversation `scope_type='document'` apontando pro source da pergunta** — não casa: 1 source tem N perguntas, viraria conversa única; queríamos 1 conv por pergunta.
+
+### Consequências
++ Multi-turn de graça via tabela existente
++ Reuso direto de `addMessage`, `getRecentMessages`, sliding window, ChatMessage UI
++ Schema migration mínima (só TypeScript enum — SQLite não valida `scope_type`)
++ Coluna `context_chunks` em messages fica null pra `quiz_question` (sem RAG)
+- Tabela `conversations` agora cobre 2 casos de uso (chat global + quiz inline). Trade-off aceitável dado que ambos são "diálogos com IA".
+- `doubt_question`/`doubt_response` viram dead columns. Removível em migration futura.
+
+---
+
+## ADR-036: Quiz inline sem RAG — contexto via system prompt
+Data: 2026-05-04 · Status: ✅ Aceita
+
+### Contexto
+Chat inline de quiz precisa do contexto da pergunta (enunciado + alternativas + correta + explicação + escolha do aluno) pra IA responder bem. Duas opções: (a) injetar via user prompt da 1ª mensagem; (b) injetar via system prompt em toda chamada.
+
+### Decisão
+**System prompt com contexto injetado**. Em toda chamada ao Claude, `buildQuizTutorSystemPrompt(ctx)` retorna prompt base + bloco com pergunta+alternativas+explicação+estado do aluno.
+
+Pipeline de `sendQuizDoubt` em `chat.service.ts`:
+1. Lê `quiz_questions` pelo id (pergunta + alternativas + explicação + selectedIndex)
+2. Cria/recupera conversation `scope_type='quiz_question'`
+3. Persiste user message
+4. Carrega histórico (sliding window 20)
+5. Monta system prompt com contexto da pergunta
+6. Chama Claude — SEM RAG, SEM rewriter
+7. Persiste resposta
+
+### Alternativas consideradas
+- **Contexto na 1ª user message** — funciona até a 1ª msg sair do sliding window. Em conversa longa (>20 turnos), IA perde contexto da pergunta.
+- **RAG (busca chunks na source da pergunta)** — adicionaria ~1.5-2s de latência por turno. Explicação oficial já carrega o material relevante. Adiado pra v0.7+ (BACKLOG).
+- **Custom retriever que injeta só o `quiz_questions` row** — over-engineering pra 1 caso de uso.
+
+### Consequências
++ Contexto da pergunta sobrevive ao sliding window (invariante)
++ System prompt cresce ~800-1500 tokens — aceitável; cacheable se Claude API fizer prompt caching no futuro
++ Pipeline mais simples que chat global (1 chamada Claude vs 2)
+- Sem RAG: dúvidas tangenciais ("isso aparece em outras aulas?") são respondidas com "use o chat global". Trade-off de simplicidade.
+
+---
+
+## ADR-037: Sliding window 10 → 20 mensagens (chat global e inline)
+Data: 2026-05-04 · Status: ✅ Aceita
+
+### Contexto
+`HISTORY_WINDOW_SIZE = 10` (5 turnos) era suficiente pro chat global na v0.4. Com chat inline em quiz (v0.7), conversas tendem a ser mais focadas e mais longas — aluno faz várias perguntas em sequência sobre o mesmo assunto.
+
+### Decisão
+Aumentar pra `20` mensagens (10 turnos). Aplica nos dois fluxos (chat global e inline).
+
+### Consequências
++ Cobre conversas mais longas sem perder contexto
++ ~2× custo de input por chamada (~2-5k tokens histórico em chat global; ~1-3k em quiz inline) — aceitável
+- Quando virar dor (>20 mensagens regulares), backlog tem entry pra rolling summary / RAG memory
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-033)
+1. Próximo número (ADR-038)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta
