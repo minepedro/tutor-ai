@@ -13,6 +13,7 @@ Desktop app open source de estudo com IA. Usuário sobe PDFs, app gera quizzes/f
 - [docs/BACKLOG.md](docs/BACKLOG.md) — tech debt e ideias adiadas
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) — o que cada release entregou
 - [docs/TODO.md](docs/TODO.md) — roadmap por versão (do início do projeto)
+- [docs/RAG_EVALUATION.md](docs/RAG_EVALUATION.md) — avaliação empírica do RAG híbrido (v0.6) + bug do backfill FTS5 + recomendações
 - Releases publicadas: https://github.com/minepedro/tutor-ai/tags
 
 ## Convenções
