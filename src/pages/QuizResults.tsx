@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { QuizOption } from '@/components/quiz/QuizOption';
+import { QuizDoubtChat } from '@/components/quiz/QuizDoubtChat';
 import { useIPC } from '@/hooks/useIPC';
 import { quizPlayPath, quizSetupPath, ROUTES, topicViewPath } from '@/lib/constants';
 import type { Quiz, QuizQuestion } from '@/types/ipc';
@@ -283,45 +284,70 @@ interface ReviewItemProps {
 }
 
 function ReviewItem({ question, indexInWrong }: ReviewItemProps) {
+  const [doubtOpen, setDoubtOpen] = useState(false);
+
   function optionState(i: number): 'correct' | 'wrong' | 'idle' {
     if (i === question.correctIndex) return 'correct';
     if (i === question.selectedIndex) return 'wrong';
     return 'idle';
   }
 
+  const state =
+    question.isCorrect === true
+      ? 'correct'
+      : question.isCorrect === false
+        ? 'wrong'
+        : 'unanswered';
+
   return (
-    <Card className="flex flex-col gap-3">
-      <div className="flex items-start gap-3">
-        <span className="rounded-full bg-surface px-2 py-0.5 font-sans text-xs text-text-muted">
-          {indexInWrong}
-        </span>
-        <p className="flex-1 font-sans text-sm font-medium leading-relaxed text-text">
-          {question.question}
-        </p>
+    <Card className="flex flex-col gap-3 p-0">
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex items-start gap-3">
+          <span className="rounded-full bg-surface px-2 py-0.5 font-sans text-xs text-text-muted">
+            {indexInWrong}
+          </span>
+          <p className="flex-1 font-sans text-sm font-medium leading-relaxed text-text">
+            {question.question}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          {question.options.map((opt, i) => (
+            <QuizOption
+              key={i}
+              index={i}
+              text={opt}
+              selected={false}
+              state={optionState(i)}
+              disabled={true}
+              onClick={() => {}}
+            />
+          ))}
+        </div>
+
+        <div className="rounded-md border border-border bg-surface px-3 py-2">
+          <p className="mb-1 font-sans text-xs font-semibold text-text-muted">
+            Explicação
+          </p>
+          <p className="font-sans text-xs leading-relaxed text-text">
+            {question.explanation}
+          </p>
+        </div>
+
+        <div className="flex justify-start">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setDoubtOpen((v) => !v)}
+          >
+            💬 {doubtOpen ? 'Fechar dúvidas' : 'Tirar dúvida'}
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        {question.options.map((opt, i) => (
-          <QuizOption
-            key={i}
-            index={i}
-            text={opt}
-            selected={false}
-            state={optionState(i)}
-            disabled={true}
-            onClick={() => {}}
-          />
-        ))}
-      </div>
-
-      <div className="rounded-md border border-border bg-surface px-3 py-2">
-        <p className="mb-1 font-sans text-xs font-semibold text-text-muted">
-          Explicação
-        </p>
-        <p className="font-sans text-xs leading-relaxed text-text">
-          {question.explanation}
-        </p>
-      </div>
+      {doubtOpen && (
+        <QuizDoubtChat quizQuestionId={question.id} state={state} />
+      )}
     </Card>
   );
 }

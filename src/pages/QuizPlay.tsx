@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/Progress';
 import { QuizCard } from '@/components/quiz/QuizCard';
 import { QuizOption } from '@/components/quiz/QuizOption';
 import { QuizExplanation } from '@/components/quiz/QuizExplanation';
+import { QuizDoubtChat } from '@/components/quiz/QuizDoubtChat';
 import { useIPC } from '@/hooks/useIPC';
 import { useQuizPlay } from '@/hooks/useQuizPlay';
 import { quizResultsPath, ROUTES, topicViewPath } from '@/lib/constants';
@@ -85,6 +86,7 @@ interface InnerProps {
 function QuizPlayInner({ quiz }: InnerProps) {
   const navigate = useNavigate();
   const play = useQuizPlay(quiz);
+  const [doubtOpen, setDoubtOpen] = useState(false);
 
   // Quando o hook marca finished, navega pros resultados.
   useEffect(() => {
@@ -94,6 +96,13 @@ function QuizPlayInner({ quiz }: InnerProps) {
   }, [play.finished, navigate, quiz.id]);
 
   const { currentQuestion, currentIndex, total, revealed, selectedIndex } = play;
+
+  // Fecha o painel de dúvidas ao trocar de pergunta — cada pergunta tem sua
+  // própria conversa, abrir manualmente força o aluno a tomar a decisão de
+  // estudar essa pergunta nova.
+  useEffect(() => {
+    setDoubtOpen(false);
+  }, [currentQuestion?.id]);
 
   if (!currentQuestion) {
     return (
@@ -172,8 +181,15 @@ function QuizPlayInner({ quiz }: InnerProps) {
             </div>
           )}
 
-          {/* Ações */}
-          <div className="flex justify-end">
+          {/* Ações + tirar dúvida */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDoubtOpen((v) => !v)}
+            >
+              💬 {doubtOpen ? 'Fechar dúvidas' : 'Tirar dúvida'}
+            </Button>
             {!revealed ? (
               <Button
                 onClick={play.confirm}
@@ -189,6 +205,22 @@ function QuizPlayInner({ quiz }: InnerProps) {
             )}
           </div>
         </Card>
+
+        {/* Chat de dúvidas inline (colapsável) */}
+        {doubtOpen && currentQuestion && (
+          <Card className="overflow-hidden p-0">
+            <QuizDoubtChat
+              quizQuestionId={currentQuestion.id}
+              state={
+                !revealed
+                  ? 'unanswered'
+                  : selectedIndex === currentQuestion.correctIndex
+                    ? 'correct'
+                    : 'wrong'
+              }
+            />
+          </Card>
+        )}
       </main>
     </div>
   );
