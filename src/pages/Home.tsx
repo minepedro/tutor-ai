@@ -51,7 +51,7 @@ export function Home() {
     <div className="flex flex-1 flex-col overflow-auto">
       <Header title="Início" subtitle="Suas matérias de estudo" />
 
-      <main className="flex-1 p-8">
+      <main className="flex-1 p-8 pb-24">
         {error && (
           <div className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 font-sans text-sm text-danger">
             {error}

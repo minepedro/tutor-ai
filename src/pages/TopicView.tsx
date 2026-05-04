@@ -152,7 +152,7 @@ export function TopicView() {
         }
       />
 
-      <main className="flex flex-1 flex-col gap-6 p-8">
+      <main className="flex flex-1 flex-col gap-6 p-8 pb-24">
         <div className="flex items-center justify-between">
           <Button
             variant="ghost"

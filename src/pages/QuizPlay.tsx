@@ -118,7 +118,7 @@ function QuizPlayInner({ quiz }: InnerProps) {
         subtitle={`${play.score} acertos · ${formatTime(play.elapsedSeconds)}`}
       />
 
-      <main className="flex flex-1 flex-col gap-6 p-8">
+      <main className="flex flex-1 flex-col gap-6 p-8 pb-24">
         {/* Botão "Sair" — quiz pausa, respostas dadas ficam salvas */}
         <div className="flex items-center justify-between">
           <Button
