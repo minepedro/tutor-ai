@@ -1,8 +1,8 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.5.1 (Markdown/LaTeX rendering)** publicada — bug fix urgente. Próximo: **v0.6.0** (filtro estrutural + full-text search + OCR), depois v0.7+ com chat inline no quiz e redesign de sidebar/chat fullscreen. Ver [BACKLOG](docs/BACKLOG.md).
-Última sessão: 2026-05-04
+**v0.6.0 (RAG híbrido)** publicada — filtro estrutural + FTS5 + Reciprocal Rank Fusion. OCR adiado pra v0.7+ (stack pesado, deserve versão dedicada). Próximo: **v0.7.0** (chat inline no quiz) e **v0.8.0** (sidebar redesign + chat fullscreen). Ver [BACKLOG](docs/BACKLOG.md).
+Última sessão: 2026-04-29
 
 ## O que é este projeto
 Desktop app open source de estudo com IA. Usuário sobe PDFs, app gera quizzes/flashcards/exercícios e responde dúvidas baseado **no material dele** (RAG local). Tudo roda offline; só chamada externa é à API Anthropic.

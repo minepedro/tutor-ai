@@ -4,6 +4,24 @@ Releases em ordem reversa.
 
 ---
 
+## v0.6.0 (2026-04-29) — RAG híbrido (estrutural + semântico + FTS)
+
+### Adicionado
+- **Filtro estrutural antes do RAG semântico**: queries como "resolva o exercício 5" ou "explica o capítulo 3" agora detectam o label estrutural e buscam direto em `structural_label = "exercício 5"`, sem passar pelo embedding. Cobertura PT-BR (exercício, exemplo, questão, problema, capítulo, seção, unidade, aula) + EN (exercise, example, problem, question, chapter, section). Recall ~100% pra queries estruturais explícitas. Ver [ADR-033](DECISIONS.md#adr-033).
+- **Full-text search via SQLite FTS5**: nova virtual table `document_chunks_fts` (external content, sem duplicação de dados) com tokenizer `unicode61 remove_diacritics 1` — busca "produção" acha "producao". Triggers AFTER INSERT/DELETE/UPDATE mantêm índice sincronizado. Ranqueamento via BM25.
+- **Hybrid search via Reciprocal Rank Fusion (RRF)**: quando não há filtro estrutural, RAG roda semantic search **e** FTS em paralelo, fundindo as duas listas com `score = Σ 1/(60 + rank)`. Recall melhor em queries técnicas (termos raros, jargão, nomes próprios) sem perder queries parafraseadas. Ver [ADR-034](DECISIONS.md#adr-034).
+- **Backfill automático do índice FTS** no boot: `applyMigrations` detecta DBs com chunks pré-v0.6 e repopula o FTS via `INSERT ... SELECT` (triggers só pegam chunks novos).
+
+### Mudado
+- `rag.service.ts`: `searchByQuery` agora tem 3 fluxos (estrutural → híbrido → fallback). Função `searchSemantic` extraída pra isolar a parte vetorial.
+- `chunks.repo.ts`: novos helpers `listChunksByStructuralLabel` e `searchChunksByFts` (com `FtsResult { chunk, rank }`).
+- `schema.sql`: adicionada FTS5 virtual table + 3 triggers de sincronização.
+
+### Adiado pra v0.7+
+- **OCR pra PDFs escaneados**. Análise mostrou stack pesado (~50MB: tesseract.js + pdfjs-dist + @napi-rs/canvas) e setup de Vite não-trivial. Versão dedicada faz mais sentido. Workaround: usar smallpdf/Adobe pra OCR antes de subir o PDF.
+
+---
+
 ## v0.5.1 (2026-05-04) — Markdown/LaTeX rendering no chat
 
 ### Corrigido

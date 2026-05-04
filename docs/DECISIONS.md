@@ -722,6 +722,72 @@ Sem framework (umzug, knex). Quando atingir ~3 migrations, trocar.
 
 ---
 
+## ADR-033: Filtro estrutural antes do RAG semântico
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+v0.5.0 já detecta labels estruturais (`structural_label = "exercício 5"`) na ingestão. Mas no chat, "resolva o exercício 5" ainda passava pelo embedding — o vetor de "exercício 5" não é especialmente próximo do vetor do conteúdo desse exercício, então a recall caía pra K vizinhos do texto da pergunta, não do exercício.
+
+### Decisão
+Antes do RAG semântico, em `rag.service.ts`, aplicar `extractStructuralFilter(query)`:
+1. Lista de regex (PT-BR + EN) detecta padrões "exerc[íi]cio N", "exemplo N", "questão N", "problema N", "capítulo N", "seção N", "unidade N", "aula N" + variantes EN
+2. Se match: normaliza pra `canonical + número` (ex: "exercício 5") e consulta `listChunksByStructuralLabel(sourceIds, label)`
+3. Se houver chunks com esse label: retorna direto (skip semântico + FTS)
+4. Se não match ou label não existe no DB: cai no fluxo híbrido (semântico + FTS)
+
+### Alternativas consideradas
+- **Usar só semântico** — evita complexidade mas tem recall ruim em queries estruturais.
+- **Sempre rodar todos (semântico + FTS + estrutural) e fundir** — RRF resolveria, mas estrutural é determinístico (match exato): faz sentido short-circuit.
+- **LLM extrair filtro** — chamada extra ao Claude, custo ~10× maior, latência. Regex resolve 95% dos casos.
+
+### Consequências
++ Recall ~100% pra queries estruturais explícitas
++ Latência menor (skip embedding + scan vetorial)
++ Determinístico, fácil de debugar
+- Cobertura limitada aos padrões na regex list (extensível)
+- Falha silenciosa: query "exercício 5" sem chunk com label "exercício 5" cai pro híbrido sem aviso
+
+---
+
+## ADR-034: Hybrid search via SQLite FTS5 + Reciprocal Rank Fusion
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+RAG só vetorial perde recall em:
+- Queries com termos raros (nomes próprios, fórmulas, jargão técnico) — embeddings aprendidos diluem palavras pouco frequentes no corpus de treino do MiniLM
+- Queries onde o usuário cita literalmente um termo do material (ex: "explica o teorema de Bolzano-Weierstrass")
+
+FTS resolve isso (BM25 prioriza match léxico raro), mas FTS sozinho perde queries parafraseadas. Híbrido é o estado da arte.
+
+### Decisão
+1. **FTS5 virtual table** `document_chunks_fts` em `schema.sql`: external content (`content=document_chunks, content_rowid=rowid`) → não duplica dados, só índice invertido. Tokenizer `unicode61 remove_diacritics 1` → "produção" acha "producao".
+2. **Triggers** AFTER INSERT/DELETE/UPDATE em `document_chunks` mantêm FTS sincronizado.
+3. **Backfill** em `applyMigrations`: pra DBs com chunks pré-v0.6, repopula FTS via `INSERT ... SELECT` (triggers só pegam novos).
+4. **Helper** `searchChunksByFts(sourceIds, query, k)` em `chunks.repo.ts`: parsea query do usuário em palavras (`\p{L}\p{N}\s+`), filtra ≥3 chars, junta com OR (`"palavra1" OR "palavra2"`), ordena por `bm25(document_chunks_fts)`.
+5. **Fusão via Reciprocal Rank Fusion (RRF)** em `rag.service.ts`:
+   - Roda semantic search → ranked list por similaridade
+   - Roda FTS → ranked list por BM25
+   - Score final: `Σ 1/(RRF_K + rank)` com `RRF_K=60`
+   - Top-K dos chunks fundidos vai pro Claude
+
+### Alternativas consideradas
+- **Só semântico** — perde queries lexicais (status quo v0.5).
+- **Só FTS** — perde paráfrases.
+- **Concatenar e re-ranquear com Claude** — caro e lento (chamada extra).
+- **Naive merge (ex: pegar top-5 de cada e dedup)** — biaseia pra resultados de uma engine; RRF é canônico (Cormack et al, SIGIR 2009).
+- **Weighted fusion** (`α·sim + (1-α)·bm25`) — exige tuning de α por corpus; RRF é parameter-free e robusto.
+
+### Consequências
++ Recall melhor em queries técnicas e paráfrases simultâneas
++ FTS5 é built-in do SQLite — sem dependência nova
++ Tokenizer unicode61 lida bem com português (acentos)
++ RRF é trivial de implementar (~15 linhas)
+- Latência ligeiramente maior: agora 2 queries (vetorial + FTS) por chamada
+- Backfill no boot pode ser lento em DBs com >10k chunks (medido aceitável até ~50k)
+- Migration assume FTS table sempre existe (criada via `CREATE VIRTUAL TABLE IF NOT EXISTS` em schema.sql)
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:

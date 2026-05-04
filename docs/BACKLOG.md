@@ -8,13 +8,40 @@ Lugar único pra "o que falta fazer" que não está no roadmap atual ([TODO.md](
 
 ## 🔥 Próxima sprint (alta prioridade)
 
-Itens priorizados — atacar antes de v0.6.0:
+- [ ] **Modelos locais (Ollama) com identificador de risco** — Suporte dual: usuário escolhe entre **API Anthropic** (default, qualidade alta) ou **modelo local via Ollama** (privacidade, offline, sem custo recorrente).
 
-- [ ] **Filtro estrutural no RAG** — quando query menciona "exercício 5" / "capítulo 3", aplicar filtro `structural_label = X` ANTES (ou em paralelo) à busca semântica. v0.5.0 detectou e indexou os labels; agora falta usar pra filtrar. Implementação: regex no rewriter pra extrair label da query → passa como predicado SQL no `getChunksByIds`. Resolve definitivamente "exercício 5" → traz só o exercício 5.
+  **Arquitetura proposta:**
+  - Settings ganha aba "Modelos" com:
+    - Toggle Provider: `anthropic | ollama`
+    - Se Ollama: dropdown de modelos pré-curados + URL do Ollama (default `localhost:11434`)
+    - Toggle de embedder: `local-onnx | ollama-nomic | ollama-mxbai`
+  - Refactor `claude.service.ts` → `llm.service.ts` com adapter pattern (Anthropic SDK | Ollama HTTP)
+  - Refactor `embedding.service.ts` igual
+  - Nova tabela LanceDB ou coluna `embedder_id` em sources pra suportar dimensões diferentes (384 vs 768 vs 1024)
+  - Schema migration pra Settings ganhar campos novos
 
-- [ ] **Full-text search complementando vetorial** — SQLite tem FTS5 builtin. Indexar `content` dos chunks. Na busca: paralelo (vetorial + FTS), merge dos resultados com pesos. Resolve "cite palavra rara" (FTS pega substring) sem perder semântica (vetor capta sinônimos).
+  **Identificador de risco** (decisão importante do Pedro 2026-05-04): cada modelo da lista vem com **scorecard visual** indicando confiabilidade por tarefa:
+  ```
+  Qwen 3 14B Q4_K_M
+  ✅ Português  ✅ Quiz simples  ⚠️ Matemática avançada  ❌ Cálculo complexo
+  Recomendado pra: leituras, conceitos, química
+  Não recomendado pra: provas de cálculo II, álgebra avançada
 
-- [ ] **OCR pra PDFs escaneados** — integrar `tesseract.js` (~30MB binário) quando `extractPdfText` retornar < 300 chars. Idealmente OCR só nos primeiros chars pra confirmar que é imagem antes de processar tudo. Suporte multilíngue (PT-BR + EN) na config.
+  DeepSeek R1 Distill 14B
+  ✅ Matemática  ✅ Raciocínio  ⚠️ Geração criativa  ✅ Português
+  Recomendado pra: exercícios resolvidos, demonstrações
+
+  Claude Sonnet 4.6 (API)
+  ✅ Tudo  💰 Pago por uso
+  ```
+
+  Critérios pro scorecard: benchmarks conhecidos (MMLU, MATH, HumanEval, MTEB pra embedders) + smoke tests internos do app (quiz de matemática conhecido, RAG fidelity test).
+
+  **Botão "Testar modelo no meu material"**: roda quiz pré-definido + chat sample, mostra resultado pra usuário avaliar antes de commitar.
+
+  **Estimativa:** v0.9.0 ou v1.0.0. Feature grande (~3-4 sessões).
+
+- [ ] **OCR pra PDFs escaneados** — Após análise mais cuidadosa em 2026-05-04, OCR exige stack pesado: `tesseract.js` (~5MB lib + ~25MB modelos PT/EN) + `pdfjs-dist` (renderizar PDF→imagem, config Vite específica) + `@napi-rs/canvas` (canvas Node cross-platform). Total +50MB no app. Performance: 5-30s por página. Pra livro de 200 páginas = ~1h de OCR. Requer UX detalhada (progresso, cancelamento, idiomas). Versão dedicada porque setup é doloroso e edge cases (layout complexo, tabelas, fórmulas em imagem) precisam de atenção. Workaround atual pro usuário: usar [smallpdf.com/pdf-ocr](https://smallpdf.com/pdf-ocr) ou Adobe pra converter PDF imagem → PDF texto antes de subir.
 
 ## 🚀 Roadmap das próximas grandes features
 
