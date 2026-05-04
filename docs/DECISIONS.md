@@ -534,10 +534,96 @@ Robustez em camadas, do mais externo pro mais interno:
 
 ---
 
+## ADR-025: RAG com scan + ranking em JS (não `table.search().where()`)
+Data: 2026-05-03 · Status: ✅ Aceita
+
+### Contexto
+Pra busca semântica do chat, precisamos achar top K chunks similares à pergunta do usuário, filtrados pelo escopo (document/topic/subject). LanceDB tem `table.search(vec).where(...).limit(K)` nativo, mas em ADR-019 já tivemos problema com `query().where()` travando em algumas operações.
+
+### Decisão
+Implementar busca via:
+1. `listChunkVectorsBySources(sourceIds[])` — scan completo + filter por source_id em JS
+2. Cosine distance entre vetor da query e cada vetor candidato (em JS)
+3. Ordenar e pegar top K
+4. Buscar conteúdo + metadados via SQLite (`getChunksByIds`)
+
+### Alternativas consideradas
+- **`table.search(vec).where("source_id IN (...)").limit(K).toArray()`** — API nativa do LanceDB. Mais eficiente pra tabelas grandes. Descartada por consistência com ADR-019 (mesma classe de bug).
+- **Construir índice IVF / HNSW** — só vale pra centenas de milhares de vetores; nosso caso (centenas-milhares) não justifica.
+
+### Consequências
++ Robusto, sem risco de travar
++ Cosine distance em JS pra 1k vetores roda em <50ms
+- O(N) por chamada — vai virar gargalo se chunks passarem de ~50k. Reavaliar em v1.0+.
+
+---
+
+## ADR-026: Chat com escopo fixo na conversa (não na rota atual)
+Data: 2026-05-03 · Status: ✅ Aceita
+
+### Contexto
+Implementação inicial passava o `scope` (do `useChatScope`, que olha a rota) como parâmetro de `sendMessage` IPC. Bug encontrado em testes manuais: usuário cria conversa no tópico A, navega pro tópico B sem fechar painel, faz nova pergunta — RAG buscava em B, quebrando coerência da conversa.
+
+### Decisão
+- Escopo é **derivado da conversa** (lido do DB) na hora de enviar mensagem.
+- IPC `chat:sendMessage(conversationId, content)` não recebe scope.
+- `chat.service.sendMessage` faz `getConversation(id)` e usa `conversation.scopeType + scopeId`.
+- UI mostra um chip "Buscando em: [escopo]" no header da conversa pra deixar claro pro usuário onde a conversa "vive".
+- A rota atual (`useChatScope`) ainda é usada pra: (1) listar conversas do escopo atual e (2) criar conversas novas com escopo da rota.
+
+### Alternativas consideradas
+- **Manter scope da rota** — quebrado por design.
+- **Permitir trocar scope no meio da conversa** — possível mas confunde UX (todo histórico da conversa mistura múltiplos escopos).
+
+### Consequências
++ Conversa mantém coerência mesmo se usuário navega pelo app
++ UI explícita sobre escopo via chip no header
+- Conversa de tópico A não aparece na lista do tópico B (correto por design, mas pode confundir até o usuário se acostumar)
+
+---
+
+## ADR-027: Chat com sliding window de 10 mensagens, sem resumo automático
+Data: 2026-05-03 · Status: ✅ Aceita
+
+### Contexto
+ARCHITECTURE.md original mencionava "últimas 10 mensagens + resumo das anteriores". Resumo automático = +1 chamada API por turno = +30% custo + complexidade.
+
+### Decisão
+v0.4.0 implementa só sliding window de 10 (5 turnos). Sem resumo. Conversas longas (raras passar de 10 turnos) perdem contexto antigo silenciosamente.
+
+### Alternativas consideradas
+- **Window maior (20-30)** — adiada; barata mas custo aumenta linearmente.
+- **Resumo automático em background** — chamada extra periódica que mantém um summary atualizado. Complexidade alta pra v0.4.0.
+- **Memória vetorial** — embeddings de mensagens antigas, retrieve quando relevantes. Complexo demais.
+
+### Consequências
++ Implementação trivial (1 query SQL `LIMIT 10`)
++ Custo previsível (1 chamada por turno + 1 de embedding)
+- Conversas com >10 turnos esquecem o início. Anotado em backlog como "memória do chat".
+
+---
+
+## ADR-028: Sem `claude.ipc.ts` (igual ADR-023, agora também pra chat)
+Data: 2026-05-03 · Status: ✅ Aceita
+
+### Contexto
+Mesmo princípio do ADR-023 (sem proxy genérico de Claude pra renderer): chat tem seu próprio IPC `chat:sendMessage`, que é feature-específico. Renderer nunca chama Claude direto.
+
+### Decisão
+- `chat.service.ts` (main process) é interno
+- IPC pro renderer é específico: `chat:create`, `chat:sendMessage`, `chat:listConversations`, etc.
+- Renderer não tem acesso a `complete()` direto.
+
+### Consequências
+- Padrão consistente com quiz (ADR-023) e qualquer feature futura que use Claude
+- Cada feature tem superfície IPC focada e validável
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-025)
+1. Próximo número (ADR-029)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta

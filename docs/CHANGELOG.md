@@ -4,6 +4,27 @@ Releases em ordem reversa.
 
 ---
 
+## v0.4.0 (2026-05-03) — Chat com RAG
+
+### Adicionado
+- **Chat com RAG (Retrieval-Augmented Generation)**: pergunte algo sobre seu material e a IA responde **só com base nos PDFs subidos**, citando fontes. Ver [ADR-025](DECISIONS.md#adr-025).
+- **Botão flutuante 💬** no canto inferior direito (sempre visível), abre painel lateral com conversas.
+- **Escopo automático** detectado pela rota: TopicView → busca no tópico inteiro; SubjectView → matéria inteira. Ver [ADR-026](DECISIONS.md#adr-026).
+- **Conversas persistentes** por escopo: lista com preview, contagem de mensagens, hover de renomear/excluir.
+- **Sliding window de 10 mensagens** mantém contexto recente sem custo absurdo. Ver [ADR-027](DECISIONS.md#adr-027).
+- **Citações inline**: cada resposta vem com chunks usados (filename + índice + similaridade%), expandíveis pra ver conteúdo.
+- **Optimistic UI**: pergunta aparece imediatamente + indicador "digitando…" enquanto Claude responde.
+- **System prompt rígido** (`chat-tutor.ts`): IA só responde do material, declina conhecimento geral, cita fontes, diz "não encontrei" quando aplicável. Sem alucinação.
+
+### Corrigido
+- **Bug de escopo**: conversa criada num tópico passou a buscar em outro tópico se o usuário navegasse pelo app sem fechar o painel. Agora o escopo é fixo na conversa (lido do DB), não da rota atual. Ver [ADR-026](DECISIONS.md#adr-026).
+
+### Caveats conhecidos
+- **Query rewriting ainda não implementado** (alta prioridade no backlog): perguntas referenciais como "resolva esse exercício" ou "explica isso" podem confundir o RAG porque a query é só a última mensagem do usuário, sem histórico. Solução planejada: chamada extra ao Claude pra reescrever a pergunta usando contexto.
+- **Sem streaming**: resposta vem completa após ~3-8s. Sem indicador token-a-token. Ver backlog.
+
+---
+
 ## v0.3.0 (2026-05-03) — Quiz
 
 ### Adicionado

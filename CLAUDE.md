@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.3.0 (Quiz)** publicada. Próximo: **v0.4.0 — Chat com RAG** (chat lateral com escopo configurável, retrieval via embeddings, citações de fonte).
+**v0.4.0 (Chat com RAG)** publicada. Próximo: **v0.5.0** — features priorizadas no [BACKLOG](docs/BACKLOG.md): query rewriting (RAG conversacional), page numbers nos chunks, estrutura detectada (exercício N), full-text search, OCR.
 Última sessão: 2026-05-03
 
 ## O que é este projeto
