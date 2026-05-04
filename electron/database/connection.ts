@@ -61,9 +61,15 @@ function applyMigrations(db: Database.Database): void {
     introdução do índice. Os triggers (afterInsert) só populam chunks
     NOVOS — chunks antigos ficaram fora do índice.
 
+    💡 IMPORTANTE: em external content tables (`content=document_chunks`),
+    `INSERT INTO fts(rowid, content) SELECT ...` insere as rows MAS NÃO
+    popula o índice invertido — MATCH retorna 0 mesmo a contagem batendo.
+    A forma correta é o comando especial `INSERT INTO fts(fts) VALUES('rebuild')`
+    que reconstrói o índice lendo a tabela externa.
+
     Detecção: schema.sql já cria a FTS via CREATE VIRTUAL TABLE IF NOT
-    EXISTS, então ela sempre existe. Comparamos contagens: se o FTS
-    está vazio mas há chunks, repopulamos.
+    EXISTS. Testamos o índice com um MATCH dummy contra um termo que
+    sabemos existir — se vier 0, rebuild.
   */
   try {
     const chunksCount = (
@@ -71,16 +77,34 @@ function applyMigrations(db: Database.Database): void {
         .prepare('SELECT COUNT(*) as count FROM document_chunks')
         .get() as { count: number }
     ).count;
-    const ftsCount = (
-      db
-        .prepare('SELECT COUNT(*) as count FROM document_chunks_fts')
-        .get() as { count: number }
-    ).count;
-    if (chunksCount > 0 && ftsCount === 0) {
-      db.exec(
-        'INSERT INTO document_chunks_fts(rowid, content) SELECT rowid, content FROM document_chunks',
-      );
-      console.log(`[migration] backfilled FTS index with ${chunksCount} chunks`);
+
+    if (chunksCount > 0) {
+      // Heurística: pega 1 palavra real do 1º chunk e testa MATCH. Se não
+      // achar nada, o índice está vazio (caso clássico: backfill antigo
+      // só inseriu rows sem indexar).
+      const sample = db
+        .prepare(
+          "SELECT content FROM document_chunks WHERE length(content) > 10 LIMIT 1",
+        )
+        .get() as { content: string } | undefined;
+      const probe = sample?.content
+        ?.replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .find((w) => w.length >= 4);
+
+      if (probe) {
+        const hits = (
+          db
+            .prepare(
+              'SELECT COUNT(*) as count FROM document_chunks_fts WHERE document_chunks_fts MATCH ?',
+            )
+            .get(probe) as { count: number }
+        ).count;
+        if (hits === 0) {
+          db.exec("INSERT INTO document_chunks_fts(document_chunks_fts) VALUES('rebuild')");
+          console.log(`[migration] rebuilt FTS index (probe "${probe}" had 0 hits)`);
+        }
+      }
     }
   } catch (err) {
     // FTS table não existe (não rodou schema?) ou outro problema. Não bloqueia.

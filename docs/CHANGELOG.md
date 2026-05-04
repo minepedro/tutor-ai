@@ -4,6 +4,20 @@ Releases em ordem reversa.
 
 ---
 
+## v0.6.1 (2026-05-04) — Fix backfill FTS5
+
+### Corrigido
+- Migration de DBs pré-v0.6: o backfill com `INSERT INTO document_chunks_fts(rowid, content) SELECT ...` inseria as rows mas **não populava o índice invertido** em external content tables — `MATCH 'qualquer_palavra'` retornava 0 resultados, deixando o FTS efetivamente desativado pra usuários que migraram de versões anteriores. Corrigido pra usar `INSERT INTO fts(fts) VALUES('rebuild')`, que reconstrói o índice lendo a tabela externa (forma documentada do FTS5).
+- Detecção do problema agora usa um probe (palavra real do 1º chunk com MATCH) em vez de só contar rows. Pega o caso onde alguém aplicou o backfill v0.6.0 mas o índice ficou vazio.
+
+### Não afetava
+- DBs criados em v0.6+ (ingestão via app): triggers AFTER INSERT funcionam normalmente — só inserts via INSERT-SELECT direto na FTS é que falhavam.
+
+### Bug detectado por
+Smoke test empírico em `scripts/compare-rag.ts` — script que compara semantic-only vs FTS-only vs híbrido RRF lado a lado. Vai pro repo como ferramenta de diagnóstico futura.
+
+---
+
 ## v0.6.0 (2026-04-29) — RAG híbrido (estrutural + semântico + FTS)
 
 ### Adicionado
