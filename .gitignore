@@ -32,3 +32,6 @@ Thumbs.db
 
 # TS incremental build
 *.tsbuildinfo
+
+# Output gerado pelos scripts de diagnóstico
+scripts/*.report.md
