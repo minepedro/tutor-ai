@@ -22,6 +22,8 @@ export interface DocumentChunk {
   content: string;
   pageNumber: number | null;
   tokenCount: number;
+  /** Label estrutural detectado (ex: "exercício 5"). Null se chunk é texto contínuo. */
+  structuralLabel: string | null;
   createdAt: string;
 }
 
@@ -31,6 +33,7 @@ export interface CreateChunkInput {
   content: string;
   tokenCount: number;
   pageNumber?: number | null;
+  structuralLabel?: string | null;
 }
 
 interface ChunkRow {
@@ -40,6 +43,7 @@ interface ChunkRow {
   content: string;
   page_number: number | null;
   token_count: number;
+  structural_label: string | null;
   created_at: string;
 }
 
@@ -51,6 +55,7 @@ function mapRow(row: ChunkRow): DocumentChunk {
     content: row.content,
     pageNumber: row.page_number,
     tokenCount: row.token_count,
+    structuralLabel: row.structural_label,
     createdAt: row.created_at,
   };
 }
@@ -69,8 +74,9 @@ export function createChunksBatch(
 ): string[] {
   const db = getDb();
   const stmt = db.prepare(
-    `INSERT INTO document_chunks (id, source_id, chunk_index, content, page_number, token_count)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO document_chunks
+       (id, source_id, chunk_index, content, page_number, token_count, structural_label)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
 
   const ids: string[] = [];
@@ -85,6 +91,7 @@ export function createChunksBatch(
         input.content,
         input.pageNumber ?? null,
         input.tokenCount,
+        input.structuralLabel ?? null,
       );
       ids.push(id);
     }
@@ -96,7 +103,7 @@ export function createChunksBatch(
 
 export function listChunksBySource(sourceId: string): DocumentChunk[] {
   const stmt = getDb().prepare<[string], ChunkRow>(
-    `SELECT id, source_id, chunk_index, content, page_number, token_count, created_at
+    `SELECT id, source_id, chunk_index, content, page_number, token_count, structural_label, created_at
      FROM document_chunks
      WHERE source_id = ?
      ORDER BY chunk_index ASC`,
@@ -118,7 +125,7 @@ export function getChunksByIds(ids: string[]): DocumentChunk[] {
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => '?').join(',');
   const stmt = getDb().prepare<string[], ChunkRow>(
-    `SELECT id, source_id, chunk_index, content, page_number, token_count, created_at
+    `SELECT id, source_id, chunk_index, content, page_number, token_count, structural_label, created_at
      FROM document_chunks
      WHERE id IN (${placeholders})`,
   );
@@ -165,8 +172,9 @@ export function copyChunksToSource(fromSourceId: string, toSourceId: string): Id
   const oldChunks = listChunksBySource(fromSourceId);
 
   const insertStmt = db.prepare(
-    `INSERT INTO document_chunks (id, source_id, chunk_index, content, page_number, token_count)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO document_chunks
+       (id, source_id, chunk_index, content, page_number, token_count, structural_label)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
 
   const idMap: IdMap = {};
@@ -181,6 +189,7 @@ export function copyChunksToSource(fromSourceId: string, toSourceId: string): Id
         old.content,
         old.pageNumber,
         old.tokenCount,
+        old.structuralLabel,
       );
     }
   });

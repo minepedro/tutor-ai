@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     content TEXT NOT NULL,
     page_number INTEGER,
     token_count INTEGER,
+    -- Label estrutural detectado (ex: "exercício 5", "capítulo 3"). v0.5.0+.
+    structural_label TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
 );

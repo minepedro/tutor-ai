@@ -32,7 +32,29 @@ export function getDb(): Database.Database {
   // pode rodar em toda inicialização sem duplicar nada.
   instance.exec(schema);
 
+  // Migrations leves pra DBs criados em versões anteriores. Cada migration
+  // é idempotente (checa se já foi aplicada). Não temos sistema completo de
+  // migrations ainda — quando virar dor (>3 migrations), trocar por umzug.
+  applyMigrations(instance);
+
   return instance;
+}
+
+/*
+  Aplica ALTER TABLE pra DBs existentes que precisam de colunas novas.
+  PRAGMA table_info retorna metadados das colunas; comparamos pra decidir.
+*/
+function applyMigrations(db: Database.Database): void {
+  // v0.5.0: adiciona structural_label em document_chunks pra DBs criados
+  // antes da v0.5 (CREATE TABLE IF NOT EXISTS não adiciona colunas novas
+  // a tabelas já existentes).
+  const chunkColumns = db
+    .prepare('PRAGMA table_info(document_chunks)')
+    .all() as Array<{ name: string }>;
+  const hasStructuralLabel = chunkColumns.some((c) => c.name === 'structural_label');
+  if (!hasStructuralLabel) {
+    db.exec('ALTER TABLE document_chunks ADD COLUMN structural_label TEXT');
+  }
 }
 
 export function closeDb(): void {
