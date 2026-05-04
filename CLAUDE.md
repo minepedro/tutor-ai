@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.5.0 (RAG enhancements)** publicada. Próximo: **v0.6.0** — filtro estrutural no RAG (usar `structural_label` pra filtrar), full-text search (SQLite FTS5), OCR (tesseract.js). Ver [BACKLOG](docs/BACKLOG.md).
+**v0.5.1 (Markdown/LaTeX rendering)** publicada — bug fix urgente. Próximo: **v0.6.0** (filtro estrutural + full-text search + OCR), depois v0.7+ com chat inline no quiz e redesign de sidebar/chat fullscreen. Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-04
 
 ## O que é este projeto

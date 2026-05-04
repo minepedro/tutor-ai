@@ -10,8 +10,6 @@ Lugar único pra "o que falta fazer" que não está no roadmap atual ([TODO.md](
 
 Itens priorizados — atacar antes de v0.6.0:
 
-- [ ] **🐛 Markdown/LaTeX rendering no chat (v0.5.1)** — chat hoje mostra markdown cru: `**negrito**`, `# títulos`, `$$LaTeX$$`, tabelas, blocos de código. Bug visível em qualquer resposta de quiz com fórmulas. **Solução:** instalar `react-markdown` + `remark-math` + `rehype-katex` + `katex` (~250KB total). Substituir split manual em `ChatMessage` por `<ReactMarkdown>` com plugins. Padrão da indústria. ~20 min de trabalho.
-
 - [ ] **Filtro estrutural no RAG** — quando query menciona "exercício 5" / "capítulo 3", aplicar filtro `structural_label = X` ANTES (ou em paralelo) à busca semântica. v0.5.0 detectou e indexou os labels; agora falta usar pra filtrar. Implementação: regex no rewriter pra extrair label da query → passa como predicado SQL no `getChunksByIds`. Resolve definitivamente "exercício 5" → traz só o exercício 5.
 
 - [ ] **Full-text search complementando vetorial** — SQLite tem FTS5 builtin. Indexar `content` dos chunks. Na busca: paralelo (vetorial + FTS), merge dos resultados com pesos. Resolve "cite palavra rara" (FTS pega substring) sem perder semântica (vetor capta sinônimos).

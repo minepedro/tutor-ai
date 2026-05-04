@@ -4,6 +4,19 @@ Releases em ordem reversa.
 
 ---
 
+## v0.5.1 (2026-05-04) — Markdown/LaTeX rendering no chat
+
+### Corrigido
+- Chat retornava markdown/LaTeX cru (`$$P(X=8)$$`, `**negrito**`, tabelas, listas, headings) em vez de renderizar visualmente. Bug visível em qualquer resposta com matemática — crítico pra estudo de exatas.
+
+### Adicionado
+- `react-markdown` + `remark-gfm` (tabelas, GFM) + `remark-math` + `rehype-katex` + `katex` pra renderização completa.
+- Components customizadas em `ChatMessage.tsx` mapeando markdown → estilos Tailwind do tema dark (sem dependência do typography plugin).
+- CSS do KaTeX importado globalmente em `main.tsx`.
+- Mensagens do **usuário** continuam plain text (preservam quebras de linha) — evita que `*texto*` digitado vire itálico inesperado.
+
+---
+
 ## v0.5.0 (2026-05-04) — RAG enhancements
 
 ### Adicionado
