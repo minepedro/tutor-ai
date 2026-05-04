@@ -50,13 +50,24 @@ export function ChatSources({ chunks }: Props) {
               key={c.chunkId}
               className="rounded-md border border-border bg-surface px-3 py-2"
             >
-              <p className="mb-1 font-sans text-xs text-text-subtle">
-                📄 {c.sourceFilename} · chunk {c.chunkIndex}
-                {' · '}
-                <span className="text-text-subtle">
-                  similaridade {((1 - c.distance) * 100).toFixed(0)}%
+              <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                <span className="font-sans text-xs text-text-subtle">
+                  📄 {c.sourceFilename} ·{' '}
+                  {c.pageNumber !== null ? (
+                    <>página {c.pageNumber}</>
+                  ) : (
+                    <>chunk {c.chunkIndex}</>
+                  )}
                 </span>
-              </p>
+                {c.structuralLabel && (
+                  <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-sans text-[10px] font-medium uppercase tracking-wide text-accent">
+                    {c.structuralLabel}
+                  </span>
+                )}
+                <span className="font-sans text-xs text-text-subtle">
+                  · similaridade {((1 - c.distance) * 100).toFixed(0)}%
+                </span>
+              </div>
               <p className="font-sans text-xs leading-relaxed text-text-muted">
                 {c.content}
               </p>

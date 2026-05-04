@@ -39,6 +39,10 @@ export interface RagChunk {
   /** Filename original do PDF (pra citação na resposta). */
   sourceFilename: string;
   chunkIndex: number;
+  /** Página (1-based) onde o chunk se origina. Null pra chunks legacy (v < 0.5). */
+  pageNumber: number | null;
+  /** Label estrutural detectado (ex: "exercício 5"). Null se não bateu padrão. */
+  structuralLabel: string | null;
   content: string;
   /** Cosine distance: 0 = idêntico, 1 = ortogonal, 2 = oposto. Menor = mais similar. */
   distance: number;
@@ -100,6 +104,8 @@ export async function searchByQuery(
         sourceId: chunk.sourceId,
         sourceFilename: filenamesBySource.get(chunk.sourceId) ?? '?',
         chunkIndex: chunk.chunkIndex,
+        pageNumber: chunk.pageNumber,
+        structuralLabel: chunk.structuralLabel,
         content: chunk.content,
         distance: s.distance,
       } satisfies RagChunk;

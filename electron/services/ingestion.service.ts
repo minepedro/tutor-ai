@@ -15,7 +15,7 @@ import {
   type ChunkVectorRecord,
 } from '../database/repositories/chunks.repo';
 import { extractPdfText } from '../utils/pdf-parser';
-import { chunkText } from '../utils/text-chunker';
+import { chunkPages } from '../utils/text-chunker';
 import { embed } from './embedding.service';
 
 /*
@@ -109,9 +109,9 @@ export async function ingestSource(
   // Persiste o texto bruto pra evitar reprocessamento se quisermos re-chunkar.
   updateSourceProcessing(sourceId, { rawText: parsed.text });
 
-  // ── 2. Chunking ──────────────────────────────────────────────────────────
+  // ── 2. Chunking (por página, preserva pageNumber) ───────────────────────
   onProgress(25, 'Dividindo em chunks…');
-  const chunks = chunkText(parsed.text);
+  const chunks = chunkPages(parsed.pages);
 
   if (chunks.length === 0) {
     throw new Error('Nenhum chunk gerado a partir do texto extraído.');
@@ -125,6 +125,8 @@ export async function ingestSource(
     chunkIndex: c.index,
     content: c.content,
     tokenCount: c.tokenCount,
+    pageNumber: c.pageNumber,
+    structuralLabel: c.structuralLabel,
   }));
   createChunksBatch(chunkInputs);
 

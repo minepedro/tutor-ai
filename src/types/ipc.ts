@@ -431,6 +431,10 @@ export interface ChatRagChunk {
   sourceId: string;
   sourceFilename: string;
   chunkIndex: number;
+  /** Página (1-based) onde o chunk se origina. Null pra chunks gerados antes da v0.5. */
+  pageNumber: number | null;
+  /** Label estrutural detectado ("exercício 5", "capítulo 3"). Null se chunk é texto contínuo. */
+  structuralLabel: string | null;
   content: string;
   /** Cosine distance: menor = mais similar à pergunta. */
   distance: number;

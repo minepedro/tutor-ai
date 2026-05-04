@@ -16,7 +16,7 @@ export const CHAT_TUTOR_SYSTEM_PROMPT = `Você é um tutor educacional que ajuda
 REGRAS RÍGIDAS:
 1. Responda APENAS com base nos trechos abaixo. Se a resposta não estiver lá, diga "Não encontrei isso no seu material" ou "O material que você subiu não cobre essa pergunta".
 2. NUNCA invente fatos, fórmulas, definições ou exemplos que não estejam nos trechos. Mesmo que você "saiba" a resposta de fora, ignore — o aluno quer aprender o material DELE.
-3. Cite a fonte sempre que possível: "De acordo com 'aula9.pdf' (chunk 5)..." ou "O material 'X.pdf' diz que...".
+3. Cite a fonte sempre que possível, com página quando disponível: "De acordo com 'aula9.pdf' (página 5)..." ou "O material 'X.pdf' (página 12) diz que...". Se a página não estiver indicada, use o índice do chunk: "(chunk 5)".
 4. Se o aluno pedir algo claramente fora do escopo (ex: "qual o resultado do jogo de ontem?"), responda educadamente que você só ajuda com o material de estudo dele.
 
 ESTILO:
@@ -33,11 +33,16 @@ LIMITAÇÃO TÉCNICA QUE O ALUNO PODE PERCEBER:
 
 /**
  * Constrói o user prompt incluindo os chunks de contexto + a pergunta do
- * usuário. Os chunks vêm rotulados pra IA poder citar.
+ * usuário. Os chunks vêm rotulados com página (quando disponível) pra IA
+ * poder citar referências reais ao usuário.
  */
 export interface ChunkContext {
   filename: string;
   chunkIndex: number;
+  /** Página 1-based, null pra PDFs ingeridos antes da v0.5. */
+  pageNumber: number | null;
+  /** Label estrutural ("exercício 5", "capítulo 3"). Null se não bateu padrão. */
+  structuralLabel: string | null;
   content: string;
 }
 
@@ -54,11 +59,17 @@ Responda dizendo que não encontrou conteúdo relevante no material para essa pe
   }
 
   const trechos = chunks
-    .map(
-      (c, i) =>
-        `[TRECHO ${i + 1}] (Fonte: "${c.filename}", chunk ${c.chunkIndex})
-${c.content}`,
-    )
+    .map((c, i) => {
+      // Monta a localização como combinação de página + label estrutural quando disponíveis.
+      // Ex: "página 5, exercício 3" — ajuda IA citar o nível certo.
+      const parts: string[] = [];
+      if (c.pageNumber !== null) parts.push(`página ${c.pageNumber}`);
+      else parts.push(`chunk ${c.chunkIndex}`);
+      if (c.structuralLabel) parts.push(c.structuralLabel);
+
+      return `[TRECHO ${i + 1}] (Fonte: "${c.filename}", ${parts.join(', ')})
+${c.content}`;
+    })
     .join('\n\n---\n\n');
 
   return `TRECHOS DO MATERIAL DO ALUNO:
@@ -69,5 +80,5 @@ ${trechos}
 
 PERGUNTA DO ALUNO: ${userQuestion}
 
-Responda usando apenas os trechos acima. Cite os trechos quando fizer sentido.`;
+Responda usando apenas os trechos acima. Cite os trechos quando fizer sentido (mencionando página e label estrutural quando disponíveis).`;
 }
