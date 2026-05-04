@@ -1,6 +1,6 @@
 {
   "name": "tutor-ai",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Open-source desktop study app with AI — quizzes, flashcards and exercise solver from your own materials.",
   "main": "out/main/index.js",
   "license": "MIT",
@@ -23,11 +23,16 @@
     "@lancedb/lancedb": "^0.18.0",
     "@xenova/transformers": "^2.17.2",
     "better-sqlite3": "^11.7.0",
+    "katex": "^0.16.45",
     "onnxruntime-node": "^1.20.0",
     "pdf-parse": "^1.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "uuid": "^11.0.0"
   },
   "devDependencies": {
