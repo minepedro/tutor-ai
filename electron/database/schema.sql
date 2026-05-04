@@ -55,6 +55,30 @@ CREATE TABLE IF NOT EXISTS document_chunks (
 );
 
 -- =============================================
+-- FTS5: índice de full-text search no content (v0.6.0+)
+-- External content table — não duplica dados, só mantém índice invertido.
+-- tokenizer remove_diacritics 1 → "produção" acha "produção" e "producao".
+-- =============================================
+CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5(
+    content,
+    content=document_chunks,
+    content_rowid=rowid,
+    tokenize='unicode61 remove_diacritics 1'
+);
+
+-- Triggers sincronizam FTS automaticamente em insert/delete/update.
+CREATE TRIGGER IF NOT EXISTS document_chunks_ai AFTER INSERT ON document_chunks BEGIN
+    INSERT INTO document_chunks_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS document_chunks_ad AFTER DELETE ON document_chunks BEGIN
+    INSERT INTO document_chunks_fts(document_chunks_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS document_chunks_au AFTER UPDATE ON document_chunks BEGIN
+    INSERT INTO document_chunks_fts(document_chunks_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+    INSERT INTO document_chunks_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+
+-- =============================================
 -- QUIZZES
 -- =============================================
 

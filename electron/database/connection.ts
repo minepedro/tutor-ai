@@ -55,6 +55,37 @@ function applyMigrations(db: Database.Database): void {
   if (!hasStructuralLabel) {
     db.exec('ALTER TABLE document_chunks ADD COLUMN structural_label TEXT');
   }
+
+  /*
+    v0.6.0: backfill da tabela FTS5 pra DBs que tinham chunks antes da
+    introdução do índice. Os triggers (afterInsert) só populam chunks
+    NOVOS — chunks antigos ficaram fora do índice.
+
+    Detecção: schema.sql já cria a FTS via CREATE VIRTUAL TABLE IF NOT
+    EXISTS, então ela sempre existe. Comparamos contagens: se o FTS
+    está vazio mas há chunks, repopulamos.
+  */
+  try {
+    const chunksCount = (
+      db
+        .prepare('SELECT COUNT(*) as count FROM document_chunks')
+        .get() as { count: number }
+    ).count;
+    const ftsCount = (
+      db
+        .prepare('SELECT COUNT(*) as count FROM document_chunks_fts')
+        .get() as { count: number }
+    ).count;
+    if (chunksCount > 0 && ftsCount === 0) {
+      db.exec(
+        'INSERT INTO document_chunks_fts(rowid, content) SELECT rowid, content FROM document_chunks',
+      );
+      console.log(`[migration] backfilled FTS index with ${chunksCount} chunks`);
+    }
+  } catch (err) {
+    // FTS table não existe (não rodou schema?) ou outro problema. Não bloqueia.
+    console.warn('[migration] FTS backfill skipped:', err instanceof Error ? err.message : err);
+  }
 }
 
 export function closeDb(): void {

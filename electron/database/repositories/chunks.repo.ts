@@ -132,6 +132,113 @@ export function getChunksByIds(ids: string[]): DocumentChunk[] {
   return stmt.all(...ids).map(mapRow);
 }
 
+/**
+ * Busca chunks que tenham um `structural_label` específico, dentro de um
+ * conjunto de sources (escopo do RAG). Usado pra filtro estrutural —
+ * "exercício 5" filtra direto, sem passar por embedding.
+ *
+ * Retorna ordenado por (source_id, chunk_index) pra preservar ordem original
+ * do material quando há múltiplas sources/cópias do mesmo label.
+ */
+export function listChunksByStructuralLabel(
+  sourceIds: string[],
+  structuralLabel: string,
+): DocumentChunk[] {
+  if (sourceIds.length === 0) return [];
+  const placeholders = sourceIds.map(() => '?').join(',');
+  const stmt = getDb().prepare<string[], ChunkRow>(
+    `SELECT id, source_id, chunk_index, content, page_number, token_count, structural_label, created_at
+     FROM document_chunks
+     WHERE source_id IN (${placeholders})
+       AND structural_label = ?
+     ORDER BY source_id, chunk_index ASC`,
+  );
+  return stmt.all(...sourceIds, structuralLabel).map(mapRow);
+}
+
+/**
+ * Item retornado pela busca FTS — chunk + posição no ranking BM25.
+ * `rank` 0 = primeiro lugar; números menores são melhores (BM25 inverte
+ * o sinal pra ORDER BY ASC ficar natural).
+ */
+export interface FtsResult {
+  chunk: DocumentChunk;
+  /** Posição 0-based no ranking BM25. */
+  rank: number;
+}
+
+/**
+ * Full-text search nos chunks dentro de um escopo (lista de sources).
+ *
+ * Usa SQLite FTS5 com tokenizer unicode61 sem diacríticos — "produção"
+ * acha "produção" e "producao". Tolerante a ordem de palavras e plurais
+ * básicos (com tokenizer porter seria melhor, mas perde acentos).
+ *
+ * 💡 Sintaxe FTS5: a query usa MATCH operator. Caracteres especiais
+ * (parênteses, aspas, *, -) são interpretados — escapamos via `"...".`
+ * cada palavra. OR explícito permite match parcial (qualquer palavra
+ * basta), em vez do AND default que exigiria TODAS.
+ */
+export function searchChunksByFts(
+  sourceIds: string[],
+  query: string,
+  k: number,
+): FtsResult[] {
+  if (sourceIds.length === 0) return [];
+
+  const ftsQuery = buildFtsQuery(query);
+  if (ftsQuery.length === 0) return []; // query sem palavras úteis
+
+  const placeholders = sourceIds.map(() => '?').join(',');
+  /*
+    JOIN entre document_chunks e document_chunks_fts via rowid.
+    bm25() retorna o score; ORDER BY rank ASC traz melhores primeiro.
+    LIMIT cuida de pegar só top K.
+  */
+  // Params heterogêneos (string + numbers) → unknown[] no tipo do prepare.
+  const stmt = getDb().prepare<unknown[], ChunkRow & { fts_rank: number }>(
+    `SELECT c.id, c.source_id, c.chunk_index, c.content, c.page_number,
+            c.token_count, c.structural_label, c.created_at,
+            bm25(document_chunks_fts) as fts_rank
+     FROM document_chunks c
+     JOIN document_chunks_fts fts ON c.rowid = fts.rowid
+     WHERE document_chunks_fts MATCH ?
+       AND c.source_id IN (${placeholders})
+     ORDER BY fts_rank
+     LIMIT ?`,
+  );
+
+  try {
+    const rows = stmt.all(ftsQuery, ...sourceIds, k);
+    return rows.map((row, idx) => ({
+      chunk: mapRow(row),
+      rank: idx,
+    }));
+  } catch (err) {
+    // Sintaxe FTS pode falhar com queries esquisitas; cai no graceful
+    // degradation (caller usa só busca semântica).
+    console.warn('[fts] query failed, returning empty:', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/**
+ * Converte query do usuário em sintaxe FTS5 segura.
+ * Estratégia: extrai palavras (≥3 chars), envolve cada uma em aspas,
+ * une com OR. "ola mundo!" → '"ola" OR "mundo"'.
+ */
+function buildFtsQuery(userQuery: string): string {
+  const words = userQuery
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ') // só letras + números (Unicode-aware)
+    .split(/\s+/)
+    .filter((w) => w.length >= 3);
+
+  if (words.length === 0) return '';
+
+  // Aspas internas escapadas via `""` (FTS5 syntax)
+  return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' OR ');
+}
+
 export function countChunksBySource(sourceId: string): number {
   const stmt = getDb().prepare<[string], { count: number }>(
     `SELECT COUNT(*) as count FROM document_chunks WHERE source_id = ?`,
