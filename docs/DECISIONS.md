@@ -866,10 +866,78 @@ Aumentar pra `20` mensagens (10 turnos). Aplica nos dois fluxos (chat global e i
 
 ---
 
+## ADR-038: Domínio plataforma-agnóstico via dependency injection
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+Decisão estratégica de eventualmente migrar o tutor.ai pra web (Next.js + Supabase). Audit em v0.7.1 revelou 4 arquivos do domínio (`utils/crypto.ts`, `services/embedding.service.ts`, `database/connection.ts`, `database/lancedb.ts`) importando `app`/`safeStorage` de `'electron'` — quebrando a regra "services e repositories ficam livres de Electron". Isso impede reuso direto do código em Next.js.
+
+### Decisão
+Aplicar **dependency injection**:
+1. Services e repositories nunca importam `'electron'`. Recebem dependências (`userDataPath: string`, `SecretStorage`) via funções `configure*()` chamadas no boot.
+2. **Composition root**: `electron/main.ts` é o ÚNICO lugar que conhece tanto Electron quanto domínio. Dentro de `app.whenReady()`:
+   ```ts
+   userDataPath = app.getPath('userData');
+   secretStorage = new ElectronSafeStorage();
+   configureDatabasePath(userDataPath);
+   configureLanceDbPath(userDataPath);
+   configureEmbeddingService(userDataPath);
+   configureClaudeService(secretStorage, userDataPath);
+   ```
+3. **Adapter pattern** pro `safeStorage`: nova interface `SecretStorage { isAvailable, encrypt, decrypt }` em `utils/crypto.ts`. Implementação concreta `ElectronSafeStorage` em `electron/adapters/electron-secret-storage.ts` — único arquivo fora de `main.ts`/`preload.ts`/`ipc/` permitido importar de `'electron'`.
+
+### Alternativas consideradas
+- **Manter como está e refazer só na branch web** — adia o trabalho mas exige mexer em arquivos críticos quando estiver fazendo migração de plataforma simultaneamente. Risco maior.
+- **Globals/singletons importando direto** — funciona local mas continua impossível reusar em Next.js.
+- **Service locator** — overkill pro tamanho do projeto.
+
+### Consequências
++ `grep -r "from 'electron'" electron/services electron/utils electron/database` retorna **zero matches**
++ Quando começar `web/` branch: services + repositories copiam direto, só troca implementação dos `configure*()`
++ Composition root explícito = mais fácil de entender ordem de bootstrap
++ Adapter pattern testável (mock `SecretStorage` em testes futuros)
+- Sutil: services agora exigem `configure*()` antes do primeiro uso. Erro claro se faltar (lança `Error('não configurado')`)
+- 1 arquivo novo (`adapters/electron-secret-storage.ts`) e ~6 funções `configure*()` novas
+
+---
+
+## ADR-039: Zod pra validação de IPC
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+Os 37 IPC handlers em `electron/ipc/*.ts` validavam input do renderer manualmente: `typeof x !== 'string'`, `Array.isArray()`, `Number.isInteger() && x >= 3 && x <= 30`, etc. Acumulavam ~200 linhas de validação boilerplate. Pior pra `quizzes:generate` (45 linhas só de validação manual).
+
+Em web (futura migração), API recebe input do mundo (não do próprio renderer) — validação manual escala mal.
+
+### Decisão
+Adotar **Zod** (`zod@4`):
+1. Schemas reusáveis em `electron/ipc/schemas.ts` (`IdSchema`, `NonEmptyStringSchema`, `NonEmptyStringArraySchema`, `ChatScopeSchema`).
+2. Helper `parseInput(schema, value)` que faz `safeParse` + lança Error com mensagens concatenadas das `issues`.
+3. Cada handler define schemas locais quando precisar (`GenerateQuizSchema`, `CreateSubjectSchema`, etc.) e chama `parseInput`.
+4. Tipos inferidos automaticamente via `z.infer<typeof Schema>`.
+5. Removido `electron/utils/type-guards.ts` (`isObject` virou desnecessário).
+
+### Alternativas consideradas
+- **Manter validação manual** — rápido mas não escala; classes inteiras de bug em web.
+- **Valibot** — menor (50% bundle de Zod) mas Zod é padrão de facto no ecossistema TS, tem mais integrações (tRPC, drizzle-zod, react-hook-form). Pesa pouco no main process.
+- **Yup** — sintaxe mais antiga, type inference pior.
+- **TypeBox / ArkType** — mais performance mas DX inferior.
+
+### Consequências
++ ~200 linhas de validação manual → ~80 linhas de schemas
++ Mensagens de erro consistentes (`<path>: <message>; <path>: <message>`)
++ Tipos inferidos automaticamente — zero duplicação entre runtime e compile time
++ Sintaxe idêntica quando virar API web (Server Actions, tRPC, Hono — todos usam Zod direto)
++ Compose: `ChatScopeSchema.extend({ title: z.string().nullable() })`
+- Bundle size: +12KB minified (aceitável; main process)
+- Aprendizado pra contributor novo, mas Zod é mainstream
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-038)
+1. Próximo número (ADR-040)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta

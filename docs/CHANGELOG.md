@@ -4,6 +4,32 @@ Releases em ordem reversa.
 
 ---
 
+## v0.7.2 (2026-05-05) — Fundação pra escala (parte 1)
+
+Release sem mudanças visíveis pro usuário, focada em preparar o código pra eventual migração futura pra web (Next.js + Supabase). Sem regressões — smoke test full passa.
+
+### Mudado
+- **Domínio plataforma-agnóstico via dependency injection**: 4 arquivos (`utils/crypto.ts`, `services/embedding.service.ts`, `database/connection.ts`, `database/lancedb.ts`) que importavam `app`/`safeStorage` de `'electron'` foram refatorados pra receber dependências via `configure*()` chamadas no boot. Audit `grep "from 'electron'" electron/services electron/utils electron/database` agora retorna zero. Ver [ADR-038](DECISIONS.md#adr-038).
+- **`main.ts` virou composition root explícito**: dentro de `app.whenReady()`, resolve `userDataPath` + `ElectronSafeStorage` adapter e injeta nos services agnósticos. Ordem de bootstrap clara.
+- **Adapter pattern pro safeStorage**: nova interface `SecretStorage` em `crypto.ts`; implementação concreta `ElectronSafeStorage` em `electron/adapters/` (único lugar fora de `main`/`preload`/`ipc` autorizado a importar `'electron'`).
+- **Validação de IPC migrada pra Zod**: 37 handlers em 9 arquivos, ~200 linhas de validação manual (`typeof`, `Array.isArray`, range checks) → ~80 linhas de schemas Zod com tipos inferidos. Helper `parseInput()` em `electron/ipc/schemas.ts` centraliza erro estruturado. Schemas reusáveis (`IdSchema`, `NonEmptyStringArraySchema`, `ChatScopeSchema`). Ver [ADR-039](DECISIONS.md#adr-039).
+
+### Adicionado
+- **`zod@4`** como dependency runtime
+- **`electron/adapters/electron-secret-storage.ts`** (novo) — adapter Electron pra interface SecretStorage
+- **`electron/ipc/schemas.ts`** (novo) — schemas Zod compartilhados + helper `parseInput`
+
+### Removido
+- **`electron/utils/type-guards.ts`** — `isObject` virou desnecessário com Zod
+
+### Backlog cleanup
+Adicionados ao [BACKLOG.md](BACKLOG.md) 7 itens não previamente listados, agora categorizados em "Robustez/Segurança" (rate limit, health check, backup), "Observabilidade" (electron-log + Sentry, structured output Anthropic), e "Tooling/Migração" (Drizzle planejado pra v0.7.3, pdf-parse → pdfjs-dist).
+
+### Próximo
+**v0.7.3** — Drizzle migration completa (better-sqlite3 puro → drizzle-orm; sistema de migrations versionado). Plano detalhado em `docs/_internal/web-migration-plan.md`.
+
+---
+
 ## v0.7.1 (2026-05-04) — Multi-seleção de temas no quiz
 
 ### Adicionado

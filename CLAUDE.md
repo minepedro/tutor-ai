@@ -1,8 +1,8 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.7.1 (multi-seleção de temas no quiz)** publicada — chips de tema viram toggle, combinam com texto livre, prompt entende lista como OR. v0.7.0 entregou chat inline em pergunta de quiz. Próximo: validação real (Pedro testando como estudante) e depois **v0.8.0** (sidebar redesign + chat fullscreen). RAG no quiz inline, OCR e migração web Supabase adiados. Ver [BACKLOG](docs/BACKLOG.md).
-Última sessão: 2026-05-04
+**v0.7.2 (fundação pra escala, parte 1)** publicada — domínio plataforma-agnóstico via DI (4 violações arquiteturais resolvidas), main.ts como composition root, validação de IPC com Zod (37 handlers migrados), backlog reorganizado por categorias. Sem mudanças visíveis pro usuário. Próximo: **v0.7.3** (Drizzle migration). Plano detalhado em `docs/_internal/web-migration-plan.md`. Ver [BACKLOG](docs/BACKLOG.md).
+Última sessão: 2026-05-05
 
 ## O que é este projeto
 Desktop app open source de estudo com IA. Usuário sobe PDFs, app gera quizzes/flashcards/exercícios e responde dúvidas baseado **no material dele** (RAG local). Tudo roda offline; só chamada externa é à API Anthropic.

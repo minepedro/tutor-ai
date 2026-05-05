@@ -100,13 +100,28 @@ Topo da coluna do meio: **seletor de escopo**:
 
 Tabela nova `conversation_scopes (conversation_id, scope_type, scope_id)` pra suportar conversas que abrangem múltiplas matérias/tópicos selecionados manualmente. UI: dropdown com checkboxes em árvore (Matéria > Tópicos).
 
+## Robustez / Segurança
+
+- [ ] **Rate limit / circuit breaker pra Anthropic API** — hoje, se um bug fizer loop em `complete()`, drena créditos da chave em minutos. Pra local solo é tolerável; pra distribuir o app pra amigos com sua chave e principalmente pra versão web é **obrigatório**. Implementação simples local: `MAX_CALLS_PER_MINUTE` em variável + contador in-memory em `claude.service.ts` (~30 linhas). Web: Upstash Redis + ratelimit middleware.
+- [ ] **Health check pós-`electron-rebuild`** — `postinstall: electron-rebuild` rebuilda binários nativos (better-sqlite3) pra Electron. Se falhar, app abre e quebra na primeira query. Sem visibilidade hoje. Adicionar smoke test pós-install que valida `getDb().prepare('SELECT 1').get()` antes de declarar sucesso.
+- [ ] **Backup automático do userData** — se `database.db` corromper (queda de luz no meio de write), aluno perde tudo. WAL ajuda mas não é garantia. Adicionar botão "Fazer backup agora" em Settings que zipa `%APPDATA%/tutor-ai/` pra pasta de backups com data. Ver também "Importar/exportar dados" abaixo (relacionado).
+
+## Observabilidade
+
+- [ ] **Substituir `console.log` por `electron-log` + Sentry** — hoje sem visibilidade do que aconteceu quando dá erro. Pra distribuir pra amigos: `electron-log` grava local. Pra produção web futura: Sentry.
+- [ ] **Anthropic structured output (JSON schema nativo)** — hoje usamos `parseLooseJsonArrayPartial` em `quiz-generation.ts` pra recuperar de respostas malformadas. A Anthropic API tem structured output nativo agora — eliminar essa classe inteira de bug + simplificar código.
+
+## Tooling / Migração
+
+- [ ] **Drizzle migration** (planejado pra v0.7.3) — substituir `better-sqlite3` direto + `applyMigrations` ad-hoc por `drizzle-orm` + `drizzle-kit`. Schema declarado em TS, migrations versionadas, mesma sintaxe quando virar Postgres web. Plano detalhado em `docs/_internal/web-migration-plan.md`.
+- [ ] **Trocar `pdf-parse` por `pdfjs-dist`** — pdf-parse 1.1.4 é dep antiga sem updates. pdfjs-dist é oficial Mozilla, mais robusto, melhor pra PDFs com layout complexo. Refactor médio porque API muda. Avaliar antes de v1.0.
+
 ## Tech Debt
 
 - [ ] **Paralelizar análise de múltiplos sources** — hoje `for (source) { await analyze(source) }` sequencial. Trocar por `Promise.all(sources.map(analyze))` reduz tempo do quiz quando usuário escolhe vários PDFs. Cuidado: rate limit (429) se muitos PDFs.
-- [ ] **Vitest + testes do chunker e ingestion service** — sem testes automatizados. Pra app com pipeline de IA, refatorar é arriscado. Prioridade: **medium**, antes da v0.4.0 (chat com RAG).
-- [ ] **Sistema de migrations** — schema é idempotente hoje (`CREATE TABLE IF NOT EXISTS`), mas a primeira mudança de coluna existente vai dar pau. Plano: `umzug` ou impl manual quando a primeira mudança aparecer.
+- [ ] **Vitest + testes do chunker, prompts e RAG** — sem testes automatizados. Pra app com pipeline de IA, refatorar é arriscado. Prioridade **alta** antes de Drizzle migration (v0.7.3) — sem testes, refator de 6 repositories é arriscado.
 - [ ] **ONNX em batch ou worker thread** — embedding hoje é sequencial single-thread. Pra PDFs >1000 chunks demora minutos. Solução: usar `embed()` com batch dim do ONNX (refactor pequeno em embedding.service.ts) ou Worker Threads (refactor médio).
-- [ ] **Dividir `src/types/ipc.ts`** quando passar de 250 linhas. Pra `types/ipc/` com 1 arquivo por feature + index.ts re-exportando.
+- [ ] **Dividir `src/types/ipc.ts`** quando passar de 250 linhas (já está em ~520). Pra `types/ipc/` com 1 arquivo por feature + index.ts re-exportando.
 - [ ] **CSP em produção pra HuggingFace Hub** — primeira ingestão precisa baixar tokenizer.json. Hoje funciona porque o download roda no main process (CSP não se aplica). Revisar quando ARM64/Mac entrar.
 
 ## Features adiadas
