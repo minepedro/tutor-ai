@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.7.0 (chat inline em pergunta de quiz)** publicada — botão "Tirar dúvida" em cada pergunta com multi-turn (reusa `conversations`+`messages`), system prompt sócrático contextual, sliding window 10→20. v0.6.1 corrigiu backfill FTS5 em DBs pré-v0.6. v0.6.0 entregou RAG híbrido. Próximo: **v0.8.0** (sidebar redesign + chat fullscreen). RAG no quiz inline e OCR adiados. Ver [BACKLOG](docs/BACKLOG.md).
+**v0.7.1 (multi-seleção de temas no quiz)** publicada — chips de tema viram toggle, combinam com texto livre, prompt entende lista como OR. v0.7.0 entregou chat inline em pergunta de quiz. Próximo: validação real (Pedro testando como estudante) e depois **v0.8.0** (sidebar redesign + chat fullscreen). RAG no quiz inline, OCR e migração web Supabase adiados. Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-04
 
 ## O que é este projeto

@@ -4,6 +4,22 @@ Releases em ordem reversa.
 
 ---
 
+## v0.7.1 (2026-05-04) — Multi-seleção de temas no quiz
+
+### Adicionado
+- **Multi-seleção de temas sugeridos**: chips de tema agora viram **toggle** (clique pra adicionar/remover). Aluno pode selecionar 2-3 temas e gerar um quiz que cobre todos. Antes, clicar num chip substituía o input — agora chips coexistem com o input de texto livre.
+- **Combinação automática**: input livre + chips selecionados são juntados num filtro único, separados por vírgula, com dedup case-insensitive ("derivadas, Derivadas" → "derivadas").
+- **Contador + botão "limpar"**: aparece quando ≥1 chip está selecionado.
+
+### Mudado
+- Prompt da etapa 2 (geração) detecta múltiplos temas separados por vírgula e instrui o modelo a tratar como OR — cada pergunta pode focar em qualquer tema da lista, distribuindo entre eles quando possível.
+- Hint do input atualizado: "separe múltiplos temas por vírgula. Chips abaixo também valem (combinam com o texto)".
+
+### Compatibilidade
+- 1 tema só funciona exatamente como antes — nenhuma mudança visível pra quem usa o fluxo single-theme.
+
+---
+
 ## v0.7.0 (2026-05-04) — Chat inline em pergunta de quiz
 
 ### Adicionado
