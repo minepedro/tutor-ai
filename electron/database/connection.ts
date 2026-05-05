@@ -51,9 +51,31 @@ export function getDb(): Database.Database {
   instance.exec(schema);
 
   // Migrations leves pra DBs criados em versões anteriores. Cada migration
-  // é idempotente (checa se já foi aplicada). Não temos sistema completo de
-  // migrations ainda — quando virar dor (>3 migrations), trocar por umzug.
+  // é idempotente (checa se já foi aplicada).
   applyMigrations(instance);
+
+  /*
+    💡 v0.7.3 — Caminho de migrations futuras (drizzle-kit):
+
+    Hoje o boot do DB combina `schema.sql` (idempotente) + `applyMigrations`
+    ad-hoc (cobre DBs pré-v0.6). Funciona pra DBs existentes, sem migration
+    framework ainda ATIVO.
+
+    Pra adicionar uma nova migration daqui pra frente:
+    1. Editar `electron/database/drizzle/schema.ts` (declarar mudança)
+    2. Rodar `npx drizzle-kit generate --name=descricao_da_mudanca`
+       (gera `0001_descricao.sql` em `electron/database/migrations/`)
+    3. Aplicar manualmente em `applyMigrations` por enquanto, OU
+    4. Quando for hora: ativar `migrate(getDrizzleDb(), { migrationsFolder })`
+       aqui (vai exigir bootstrap pra DB legacy — popular __drizzle_migrations
+       sem re-rodar 0000_initial_baseline). Anotado em BACKLOG.
+
+    Por que ainda não ativamos o `migrate()` agora? Pra DBs legacy (de quem
+    instalou v0.7.2 ou antes), `migrate()` tentaria rodar
+    `0000_initial_baseline.sql` que faz CREATE TABLE sem IF NOT EXISTS — daria
+    erro "table already exists". Evitamos esse risco no release atual; ativação
+    é trabalho focado pra próxima v0.8.x.
+  */
 
   return instance;
 }
