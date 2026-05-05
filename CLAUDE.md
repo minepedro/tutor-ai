@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.9.0 (Pipeline V2 Track 1: clustering semântico)** publicada — K-means sobre embeddings agrupa conceitos em clusters; etapa 2 distribui quota fixa por cluster com shuffle pra eliminar bias. Resolve cobertura desigual em multi-PDF. Distratores melhorados via misconceptions (+8% papers). Próximo: **v0.9.1** (modo "🤖 Recomendado" default). Ver [ADR-043](docs/DECISIONS.md#adr-043).
+**v0.9.1 (warning de cobertura)** publicada — warning visual no QuizSetup quando `count < numSources` com botão pra ajustar automático. 4 cenários de teste empíricos rodados ($2.21 em API) registrados em `docs/_internal/pipeline-evaluation-2026-05-05.md`: NEW é o melhor pipeline padrão. Pipeline V3 (5 fases científico) anotado no BACKLOG pra v0.10+. Próximo natural: **v0.9.2** (multi-batch) ou pausar pra usar o app. Ver [ADR-043](docs/DECISIONS.md#adr-043).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

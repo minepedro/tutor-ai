@@ -4,6 +4,35 @@ Releases em ordem reversa.
 
 ---
 
+## v0.9.1 (2026-05-05) — Warning de cobertura no QuizSetup
+
+Resolve a dor reportada de forma direta e barata: quando o aluno seleciona muitos PDFs e pede poucas perguntas, alguns PDFs ficam sem nenhuma pergunta no quiz. Avaliação experimental dos pipelines (4 cenários, $2.21 em API) confirmou que **nenhum pipeline garante 100% cobertura quando count < numSources** — solução robusta é educar o usuário antes de gerar.
+
+### Adicionado
+- **Warning visual** no `QuizSetup` quando `count < selectedSourceIds.size && >1`. Aparece logo abaixo do slider de número de perguntas. Mensagem: "⚠️ Você selecionou X materiais mas pediu só Y perguntas. Pelo menos (X-Y) PDFs vão ficar sem nenhuma pergunta."
+- **Botão "↑ Aumentar para X (1 por PDF)"** dentro do warning — ajusta o slider automaticamente. Trivial pra usar.
+
+### Observações
+- Cálculo é trivial (matemática local) — sem chamada de IA, custo zero.
+- Não bloqueia geração — usuário pode seguir mesmo assim. Sugestão honesta, decisão dele.
+
+### Documentado em
+- `docs/_internal/pipeline-evaluation-2026-05-05.md` (gitignored) — registra os 4 cenários de teste, métricas comparativas dos 7 pipelines avaliados, custos, recomendações.
+- `docs/BACKLOG.md` — Pipeline V3 (5 fases) proposto pra v0.10.x ou v1.0, com plano de avaliação científica.
+
+### Conclusão dos testes (resumo)
+- **NEW (v0.9.0) é o melhor pipeline padrão** — pior caso melhor que TFIDF/KEYBERT, especialmente em corpus monotemático.
+- TFIDF brilhou em corpus heterogêneo (5 PDFs de domínios diferentes) mas caiu em monotemático (9 PDFs Toyota).
+- KEYBERT-like (sem análise Claude) ficou em terceiro em todos os cenários — falta de definições rica prejudica perguntas com cálculo.
+- SOURCE_RR (quota explícita por source no prompt) **não cumpre 100%** — Sonnet 4.6 ignora quotas hard. Pra forçar 100% precisa 1 chamada por source (3× custo).
+
+### Próximos
+- **v0.9.2 (Track 3 do plano)**: multi-batch generation pra resolver degradação em count alto + truncamento de quiz grandes
+- **v0.9.x ou v0.10**: modo "🤖 Recomendado" como default (Track 2)
+- **v0.10+ ou v1.0**: Pipeline V3 científico com benchmark formal (proposto por Pedro, ver BACKLOG)
+
+---
+
 ## v0.9.0 (2026-05-05) — Pipeline V2 Track 1: clustering semântico + cobertura uniforme
 
 Resolve dor reportada: "13 PDFs com 10 questões, alguns PDFs ficavam sem nenhuma pergunta". Primeiro de 3 tracks da v0.9 — entrega cobertura uniforme garantida via clustering. Tracks 2 (UI Recomendado) e 3 (texto livre + batching) seguem em v0.9.1/v0.9.2.

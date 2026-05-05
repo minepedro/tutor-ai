@@ -128,6 +128,49 @@ Suporte a PDFs escaneados/imagem via OCR no próprio app, eliminando a necessida
 
 **Alternativa intermediária (simpler win):** detector de "PDF parece imagem" na ingestão que avisa o usuário sem fazer OCR — entregaria 80% do valor com 5% do trabalho. Vale considerar pra v0.8.x.
 
+### v0.10.x ou v1.0 — Pipeline V3 científico (5 fases)
+
+Após avaliação experimental dos pipelines em 2026-05-05 (4 cenários, $2.21 em testes — registrados em `docs/_internal/pipeline-evaluation-2026-05-05.md`), Pedro propôs uma arquitetura mais sofisticada que resolve múltiplas limitações simultaneamente:
+
+```
+FASE 1 — INGESTÃO (paralela)
+  pdf-parse + pdfjs (TOC) → structured_text[] + headings[]
+
+FASE 2 — EXTRAÇÃO (paralela, 2-pass)
+  Pass A (Haiku rápido): scan → candidatos brutos
+  Pass B (Sonnet profundo): refina top conceitos com contexto
+
+FASE 3 — ORGANIZAÇÃO (matemática)
+  embed conceitos (ONNX local) → dedup semântico (cosine > 0.88)
+  K otimizado via silhouette (4-15) → K-means clustering
+  slot allocation ponderado (importância × source coverage)
+
+FASE 4 — GERAÇÃO (streaming)
+  N requests paralelos a Sonnet (1 por cluster) → resolve truncamento
+  stream de cada pergunta pra UI
+  dedup semântico entre perguntas geradas
+
+FASE 5 — VALIDAÇÃO (assíncrona)
+  Haiku judge por pergunta (paralelo) → regenera as que falharam
+```
+
+**Resolve simultaneamente:**
+- Truncamento (geração paralela por cluster, sem hard limit de tokens)
+- Bias de ordem (slot allocation explícito)
+- Duplicatas semânticas (dedup com cosine ≥ 0.88)
+- UX (streaming token a token)
+- Robustez (regeneração de perguntas que falharam validação)
+- Cobertura uniforme (slot allocation pondera por source)
+
+**Antes de implementar:** montar plano científico de avaliação:
+- Métricas formais: nDCG@K, recall@K, BLEU pro stem, plausibility score pros distratores
+- Benchmark com ground truth manual: Pedro avalia 50-100 perguntas geradas (quais "boas" / "ruins")
+- Comparação ABCD entre pipelines (V2 atual vs V3 novo) com estatística
+
+**Estimativa:** ~3-4 sessões pra V3 + 1 sessão pra benchmark. Total: ~v0.10 a v1.0. Custo Anthropic do benchmark: ~$5-10.
+
+**Pré-requisito:** ter usado o app por algumas semanas pra ter feedback real do que dói no pipeline atual antes de over-engineer.
+
 ## Robustez / Segurança
 
 - [ ] **Rate limit / circuit breaker pra Anthropic API** — hoje, se um bug fizer loop em `complete()`, drena créditos da chave em minutos. Pra local solo é tolerável; pra distribuir o app pra amigos com sua chave e principalmente pra versão web é **obrigatório**. Implementação simples local: `MAX_CALLS_PER_MINUTE` em variável + contador in-memory em `claude.service.ts` (~30 linhas). Web: Upstash Redis + ratelimit middleware.
