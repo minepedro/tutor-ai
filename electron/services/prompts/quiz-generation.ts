@@ -1,6 +1,7 @@
 import { complete } from '../claude.service';
 import { parseLooseJson, parseLooseJsonArrayPartial } from '../../utils/json-parse';
 import type { ExtractedConcept } from './quiz-analysis';
+import type { ConceptCluster } from '../clustering.service';
 
 /*
   Etapa 2 do pipeline: geração de perguntas.
@@ -33,7 +34,9 @@ export interface GeneratedQuestion {
 }
 
 export interface GenerationParams {
-  concepts: ExtractedConcept[];
+  /** Clusters de conceitos (v0.9.0+). Cada cluster vira um "tema" implícito;
+      o modelo distribui perguntas com quota fixa por cluster. */
+  clusters: ConceptCluster[];
   /** 3 a 30. */
   count: number;
   /** Tipo de pergunta desejado. */
@@ -46,15 +49,28 @@ export interface GenerationParams {
   themeFilter?: string;
 }
 
-const SYSTEM_PROMPT = `Você é um professor que cria quizzes de alta qualidade. Recebe uma lista de conceitos já analisados e gera perguntas que testam compreensão real.
+/*
+  System prompt v0.9.0+:
+  - Recebe conceitos AGRUPADOS POR TEMA (cluster semântico)
+  - Instrui distribuição uniforme: quota fixa por tema
+  - Distratores melhorados via técnica de papers acadêmicos
+    (arXiv 2404.02124 / arXiv 2307.16338 — +8% qualidade aprovada por
+    professores): pedimos misconceptions plausíveis, não só "erros"
+*/
+const SYSTEM_PROMPT = `Você é um professor que cria quizzes de alta qualidade. Recebe conceitos AGRUPADOS POR TEMA (clusters semânticos) e gera perguntas que testam compreensão real.
 
-REGRAS:
+REGRAS DE COBERTURA (v0.9.0+):
+- O usuário verá perguntas de TODOS os temas. Distribua perguntas UNIFORMEMENTE entre os temas listados (ex: 8 perguntas, 4 temas → 2 perguntas por tema).
+- Se a divisão não for exata, distribua o resto entre temas de maior importância pedagógica.
+- Não concentre perguntas em 1 ou 2 temas só porque tem mais conceitos lá. Cobertura > profundidade num tema só.
+
+REGRAS DE QUALIDADE:
 - TESTAR COMPREENSÃO, não memorização. Evite perguntas tipo "qual a definição de X?".
-- Distratores (alternativas erradas) devem ser PLAUSÍVEIS — coisas que um aluno mal preparado escolheria. Nunca distratores absurdos.
-- Misture dificuldades: ~30% easy, ~50% medium, ~20% hard.
+- DISTRATORES = MISCONCEPTIONS PLAUSÍVEIS. Cada alternativa errada deve representar um ERRO COMUM que aluno mal-preparado cometeria. Pense: "que confusão alguém faria com esse conceito?". Distratores absurdos são banidos — eles não testam nada.
+- Misture dificuldades por TEMA: idealmente 1 easy + 1 medium por tema; hard pra temas com múltiplos conceitos relacionáveis.
 - "easy" = aplica direto a definição. "medium" = compara conceitos ou aplica em caso novo. "hard" = sintetiza múltiplos conceitos ou caso complexo.
 - Cada pergunta tem UMA resposta correta inequívoca.
-- Explicação detalhada da resposta correta (3-5 frases): por que ela é certa E por que as outras estão erradas.
+- Explicação detalhada (3-5 frases): por que a correta é certa E por que CADA distrator está errado (revela a misconception específica).
 - Idioma: igual ao dos conceitos (geralmente português).
 
 FORMATO DE SAÍDA: APENAS um array JSON, sem texto antes/depois, sem markdown. Schema:
@@ -66,8 +82,9 @@ FORMATO DE SAÍDA: APENAS um array JSON, sem texto antes/depois, sem markdown. S
     "question": "string — enunciado claro",
     "options": ["string", "string", "string", "string"],  // 4 alternativas pra MC, 2 pra TF (sempre ["Verdadeiro","Falso"])
     "correct_index": 0 | 1 | 2 | 3,  // index 0-based da correta
-    "explanation": "string — 3-5 frases explicando",
-    "concepts_ref": ["nome do conceito"]  // opcional, conceitos testados
+    "explanation": "string — 3-5 frases explicando incluindo POR QUE cada distrator está errado",
+    "concepts_ref": ["nome do conceito"],  // opcional, conceitos testados
+    "cluster_id": "string"  // ID do cluster de origem (ex: "c0", "c1") — ajuda debug
   }
 ]`;
 
@@ -160,12 +177,34 @@ export async function generateQuestions(
 }
 
 function buildUserPrompt(params: GenerationParams): string {
-  const conceptsText = params.concepts
-    .map((c) => {
-      const related = c.related?.length ? ` (relacionado a: ${c.related.join(', ')})` : '';
-      return `- ${c.name} [${c.importance}]: ${c.definition}${related}`;
+  /*
+    v0.9.0+: conceitos vêm AGRUPADOS POR TEMA (cluster semântico). Cada cluster
+    vira um bloco rotulado [TEMA N — id]. O prompt instrui o modelo a
+    distribuir perguntas uniformemente entre os blocos.
+
+    Quota por cluster pré-calculada no orquestrador é uma sugestão visual,
+    mas o modelo pode ajustar levemente baseado em complexidade dos conceitos.
+  */
+  const nClusters = params.clusters.length;
+  const baseQuotaPerCluster = Math.floor(params.count / nClusters);
+  const remainder = params.count - baseQuotaPerCluster * nClusters;
+
+  const clustersText = params.clusters
+    .map((cluster, idx) => {
+      const themeNum = idx + 1;
+      // Os primeiros `remainder` clusters ganham 1 pergunta extra pra fechar count
+      const quota = baseQuotaPerCluster + (idx < remainder ? 1 : 0);
+      const conceptsText = cluster.concepts
+        .map((c) => {
+          const related = c.related?.length
+            ? ` (relacionado a: ${c.related.join(', ')})`
+            : '';
+          return `  - ${c.name} [${c.importance}]: ${c.definition}${related}`;
+        })
+        .join('\n');
+      return `[TEMA ${themeNum} — ${cluster.id}] ~${quota} ${quota === 1 ? 'pergunta' : 'perguntas'}\n${conceptsText}`;
     })
-    .join('\n');
+    .join('\n\n');
 
   const typeInstruction = (() => {
     switch (params.types) {
@@ -198,11 +237,11 @@ function buildUserPrompt(params: GenerationParams): string {
     return `\n\nFILTRO DE TEMAS (múltiplos): gere perguntas que envolvam PELO MENOS UM dos seguintes temas: ${list}. Cada pergunta pode focar em qualquer tema da lista (interpretação OR — distribua as perguntas entre os temas quando possível). Se nenhum conceito da lista cobrir nenhum dos temas, retorne array vazio.`;
   })();
 
-  return `Conceitos extraídos do material de estudo:
+  return `Conceitos do material de estudo, AGRUPADOS POR TEMA (${nClusters} ${nClusters === 1 ? 'tema' : 'temas'}):
 
-${conceptsText}
+${clustersText}
 
-Gere ${params.count} perguntas seguindo as regras do sistema.
+Gere ${params.count} perguntas no total, seguindo as quotas sugeridas por tema (~${baseQuotaPerCluster}${remainder > 0 ? ` ou ${baseQuotaPerCluster + 1}` : ''} por tema). Cada pergunta deve incluir o "cluster_id" do tema de origem (ex: "${params.clusters[0]?.id ?? 'c0'}").
 
 Tipo: ${typeInstruction}${themeInstruction}`;
 }

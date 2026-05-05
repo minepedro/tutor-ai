@@ -8,6 +8,7 @@ import {
 } from './prompts/quiz-generation';
 import { validateQuestions, type ValidationVerdict } from './prompts/quiz-validation';
 import { suggestThemesFromText } from './prompts/theme-suggester';
+import { clusterConcepts, type ConceptCluster } from './clustering.service';
 
 /*
   Orquestrador do pipeline de 3 etapas:
@@ -173,11 +174,28 @@ export async function generateQuiz(
     throw new Error('Nenhum conceito foi extraído do material. PDF pode estar com texto ilegível.');
   }
 
+  // ── Etapa 1.5: clustering semântico (v0.9.0+) ──────────────────────────
+  /*
+    Agrupa conceitos por similaridade semântica via K-means sobre embeddings.
+    Cada cluster vira um "tema" implícito; etapa 2 distribui perguntas com
+    quota fixa por cluster, garantindo cobertura uniforme.
+
+    Pattern de produção SOTA (47billion blog): cluster + quota > flat list.
+    Reusa embedding.service ONNX local (gratuito; ~100ms pra 200 conceitos).
+  */
+  onProgress(33, `Agrupando ${allConcepts.length} conceitos em temas…`);
+  const clusters = await clusterConcepts(allConcepts);
+  // Shuffle pra evitar bias de ordem (modelo tende a focar nos primeiros)
+  shuffleInPlace(clusters);
+
   // ── Etapa 2: geração ───────────────────────────────────────────────────
-  onProgress(35, `Gerando ${input.count} perguntas…`);
+  onProgress(
+    35,
+    `Gerando ${input.count} perguntas em ${clusters.length} ${clusters.length === 1 ? 'tema' : 'temas'}…`,
+  );
 
   const generationParams: GenerationParams = {
-    concepts: allConcepts,
+    clusters,
     count: input.count,
     types: input.types,
     ...(input.themeFilter ? { themeFilter: input.themeFilter } : {}),
@@ -311,6 +329,20 @@ async function analyzeAndCache(
   });
   onProgress(100, 'Análise concluída.');
   return result;
+}
+
+/**
+ * Fisher-Yates shuffle in place. Usado pra randomizar a ordem dos clusters
+ * antes de mandar pro modelo — evita bias de ordem (modelo tende a focar
+ * nos primeiros itens da lista).
+ */
+function shuffleInPlace<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
 }
 
 function validateInput(input: GenerateQuizInput): void {
