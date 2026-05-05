@@ -1,6 +1,8 @@
 export const ROUTES = {
   ONBOARDING: '/onboarding',
   HOME: '/',
+  /** Chat fullscreen (v0.8.0+). Escopo default: global (todos os PDFs). */
+  CHAT: '/chat',
   SETTINGS: '/settings',
   /** Padrão usado no <Route />. Para navegar, use `subjectViewPath(id)`. */
   SUBJECT_VIEW: '/subjects/:id',
