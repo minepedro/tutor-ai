@@ -4,6 +4,37 @@ Releases em ordem reversa.
 
 ---
 
+## v0.8.0 (2026-05-05) — Sidebar Notion-style + Chat fullscreen + escopo global
+
+### Adicionado
+- **Sidebar redesign Notion-style**: árvore expansível mostrando todas as matérias com seus tópicos abaixo (`▸/▾` toggle). Tópicos carregados lazy ao expandir. Substitui sidebar minimalista (Início + Configurações) por algo navegável. Item "💬 Chat" e "🏠 Início" no topo; "⚙️ Configurações" no fim.
+- **Rota `/chat` (chat fullscreen)**: layout 2 colunas — lista de conversas à esquerda, mensagens com input à direita. Escopo default: global (busca em todos os PDFs do app). Reutiliza `ChatMessage`, `ChatInput`, `ChatConversationList`. Ver [ADR-041](DECISIONS.md#adr-041).
+- **Escopo `'global'`** no chat: novo valor em `ScopeType` + `RagScope`. RAG resolve via `listAllSources()` em `sources.repo.ts` — busca em todos os PDFs em qualquer matéria/tópico. Suporta perguntas que cruzam material ("o que vimos sobre X em Cálculo e em Probabilidade?").
+- **Versão dinâmica na sidebar**: substituiu o `v0.1.0` hardcoded por `app.getVersion()` IPC.
+
+### Mudado
+- `Sidebar.tsx` reescrita completamente.
+- `chat.service.ts:conversationScopeToRagScope` aceita 'global'.
+- `rag.service.ts:resolveSourceIds` aceita 'global'.
+- `ChatScopeSchema` em `electron/ipc/schemas.ts` aceita 'global'.
+- `App.tsx`: nova rota `/chat`.
+- `AppLayout.tsx`: drawer flutuante 💬 e ChatPanel **escondidos quando `location.pathname === '/chat'`** (evita redundância — chat fullscreen já está visível).
+
+### Coexistência (importante)
+- **Drawer flutuante 💬 continua funcionando** em todas as rotas EXCETO `/chat`. Quem usava o drawer pra "chatar dentro do tópico atual" não perde funcionalidade.
+- /chat fullscreen é caminho NOVO, não substituto imediato. Migração gradual em 2 versões.
+- Em v0.8.1+: se `/chat` ganhar dropdown de escopo (topic/subject/global), drawer pode ser removido.
+
+### Ainda não entregue (v0.8.1+)
+- Dropdown de escopo dentro de `/chat` (ex: escolher entre Tópico/Matéria/Global)
+- Coluna lateral dedicada de "Fontes" no /chat (hoje fontes aparecem inline em cada mensagem assistant, igual no drawer)
+- Múltiplas seleções de escopo (planejada pra v0.9+, requer tabela nova `conversation_scopes`)
+
+### Caveats
+- `scope_id` para conversa global é o literal `'global'` (NOT NULL no schema obriga). Não muda nada no comportamento; pra multi-user web futura, trocar por `user_id` faz mais sentido.
+
+---
+
 ## v0.7.5 (2026-05-05) — Cache in-memory + UX do botão "Sugerir temas"
 
 Continuação do hotfix v0.7.4. Resolve 2 problemas reportados:

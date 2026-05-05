@@ -976,10 +976,50 @@ Aspectos da adoção:
 
 ---
 
+## ADR-041: Escopo `'global'` no chat + chat fullscreen em /chat
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+Drawer flutuante 💬 do chat (v0.4-v0.7) abre painel à direita com escopo derivado da rota atual: TopicView → escopo `topic`, SubjectView → `subject`. Limitações:
+1. **Sem busca em todo o material**: aluno só conseguia chatar dentro de 1 tópico ou 1 matéria por vez. Pra perguntas que cruzam matérias ("o que vimos sobre análise de dados em Cálculo E em Probabilidade?"), não tinha caminho.
+2. **UX em telas pequenas**: drawer divide a tela; em laptops 13", chat fica apertado.
+3. **Navegação**: pra abrir chat de outro escopo, tinha que navegar pra outra rota primeiro.
+
+### Decisão
+Duas mudanças complementares:
+
+1. **Adicionar `'global'` ao `ScopeType`** em `conversations.repo.ts` (e `RagScope` em `rag.service.ts`). Conversa global tem `scope_id='global'` (literal — exigido pelo NOT NULL do schema mas não usado no RAG). RAG resolve global via `listAllSources()` — busca em tudo que o aluno subiu.
+
+2. **Nova rota `/chat`** com chat fullscreen (layout 2 colunas: lista de conversas | mensagens). Default = escopo global. Acessível pelo item "💬 Chat" da nova sidebar Notion-style.
+
+3. **Sidebar redesign**: árvore expansível mostrando matérias + tópicos abaixo (`▸/▾` toggle). Carrega tópicos lazy ao expandir. Substitui sidebar minimalista (Início + Configurações) por algo navegável.
+
+### Coexistência (transição em v0.8)
+Drawer flutuante 💬 e ChatPanel **continuam funcionando** em todas as rotas exceto `/chat`. Isso garante:
+- Quem usava drawer pra "chatar dentro do tópico atual" não perde funcionalidade
+- /chat fullscreen é caminho NOVO, não substituto imediato
+- Em v0.8.1+, se /chat ganhar dropdown de escopo (topic/subject/global), drawer pode ser removido.
+
+### Alternativas consideradas
+- **`scope_id` nullable pra global** — exigiria migration no schema (`ALTER TABLE` pra remover NOT NULL); literal `'global'` evita.
+- **Tabela nova `conversation_scopes`** (multi-escopo): planejada pra v0.9+. Pra escopo único global não vale a complexidade agora.
+- **Substituir drawer por /chat de uma vez** — quebra fluxo de quem usa "chat com escopo da rota atual". Migração gradual em 2 versões reduz risco.
+
+### Consequências
++ Aluno consegue chatar em todo material num lugar único
++ Chat fullscreen tem espaço pra layout 2 colunas (lista + mensagens) confortável
++ Sidebar Notion-style facilita navegação entre matérias/tópicos
++ Sem mudança no schema SQL (só TS)
+- Drawer e /chat coexistem temporariamente; documentação clara em ADR e CHANGELOG necessária
+- `'global'` como literal de `scope_id` é convenção; ao virar multi-user (web), trocar por `user_id` ou similar
+- Sidebar com lista de subjects faz IPC no mount (~50ms); aceitável
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-041)
+1. Próximo número (ADR-042)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta
