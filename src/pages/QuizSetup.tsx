@@ -367,6 +367,34 @@ export function QuizSetup() {
             max={COUNT_MAX}
           />
 
+          {/*
+            Warning de cobertura (v0.9.1+): quando count < numSources, alguns
+            PDFs vão ficar SEM nenhuma pergunta. Avisa o aluno e oferece
+            sugestão de aumentar count. Cálculo trivial — sem chamada IA.
+            Documentação técnica em docs/_internal/pipeline-evaluation-*.
+          */}
+          {count < selectedSourceIds.size && selectedSourceIds.size > 1 && (
+            <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3">
+              <p className="font-sans text-sm font-medium text-warning">
+                ⚠️ Cobertura desigual provável
+              </p>
+              <p className="mt-1 font-sans text-xs leading-relaxed text-text">
+                Você selecionou <strong>{selectedSourceIds.size} materiais</strong>{' '}
+                mas pediu só <strong>{count} perguntas</strong>. Pelo menos{' '}
+                <strong>{selectedSourceIds.size - count}</strong>{' '}
+                {selectedSourceIds.size - count === 1 ? 'PDF vai' : 'PDFs vão'}{' '}
+                ficar sem nenhuma pergunta.
+              </p>
+              <button
+                type="button"
+                onClick={() => setCount(selectedSourceIds.size)}
+                className="mt-2 font-sans text-xs text-warning underline hover:opacity-80"
+              >
+                ↑ Aumentar para {selectedSourceIds.size} (1 por PDF)
+              </button>
+            </div>
+          )}
+
           {/* ─── Tipo ─── */}
           <div className="flex flex-col gap-2">
             <label className="font-sans text-sm font-medium text-text-muted">
