@@ -1,6 +1,6 @@
 {
   "name": "tutor-ai",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Open-source desktop study app with AI — quizzes, flashcards and exercise solver from your own materials.",
   "main": "out/main/index.js",
   "license": "MIT",
