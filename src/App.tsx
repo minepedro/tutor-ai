@@ -9,6 +9,7 @@ import { TopicView } from '@/pages/TopicView';
 import { QuizSetup } from '@/pages/QuizSetup';
 import { QuizPlay } from '@/pages/QuizPlay';
 import { QuizResults } from '@/pages/QuizResults';
+import { ChatPage } from '@/pages/ChatPage';
 import { ROUTES } from '@/lib/constants';
 
 export function App() {
@@ -43,6 +44,7 @@ export function App() {
           element={hasKey ? <AppLayout /> : <Navigate to={ROUTES.ONBOARDING} replace />}
         >
           <Route path={ROUTES.HOME} element={<Home />} />
+          <Route path={ROUTES.CHAT} element={<ChatPage />} />
           <Route path={ROUTES.SUBJECT_VIEW} element={<SubjectView />} />
           <Route path={ROUTES.TOPIC_VIEW} element={<TopicView />} />
           <Route path={ROUTES.QUIZ_SETUP} element={<QuizSetup />} />
