@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.8.4 (quiz mais rápido)** publicada — Haiku 4.5 na validação (etapa 3) + análise paralelizada (etapa 1). Quiz com 3-5 sources caiu de ~60-90s pra ~30-35s. v0.8.3 entregou dropdown de escopo no /chat; v0.8.2 detector PDF imagem. Próximo: validação real (uso) ou outras otimizações. Ver [BACKLOG](docs/BACKLOG.md).
+**v0.8.5 (barra de progresso suave)** publicada — `useSmoothProgress` interpola visualmente entre checkpoints reais (5/30/35/75/100%) com curva ease-out. Resolve sensação de "barra travada" entre etapas longas. v0.8.4 entregou Haiku validação + paralelização. Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

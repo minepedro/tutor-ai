@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Progress } from '@/components/ui/Progress';
 import { useIPC } from '@/hooks/useIPC';
 import { useQuizGeneration } from '@/hooks/useQuizGeneration';
+import { useSmoothProgress } from '@/hooks/useSmoothProgress';
 import { quizPlayPath, ROUTES, topicViewPath } from '@/lib/constants';
 import type { QuestionTypePref, Source, Subject, Topic } from '@/types/ipc';
 
@@ -42,6 +43,11 @@ export function QuizSetup() {
   );
 
   const generation = useQuizGeneration();
+  // Interpola visualmente o progresso entre os checkpoints reais — evita
+  // sensação de "barra travada" durante etapas longas (geração ~18s, etc).
+  const smoothPct = useSmoothProgress(
+    generation.generating ? (generation.progress?.pct ?? 0) : null,
+  );
 
   // Carrega tópico → matéria → sources do tópico
   useEffect(() => {
@@ -397,9 +403,10 @@ export function QuizSetup() {
               </p>
             </div>
             <div className="mt-6 flex flex-col gap-2">
-              <Progress value={generation.progress?.pct ?? 0} />
+              <Progress value={smoothPct} />
               <p className="text-center font-sans text-xs text-text-muted">
-                {generation.progress?.status ?? 'Iniciando…'}
+                {generation.progress?.status ?? 'Iniciando…'} ·{' '}
+                <span className="font-mono">{smoothPct}%</span>
               </p>
             </div>
           </Card>

@@ -4,6 +4,29 @@ Releases em ordem reversa.
 
 ---
 
+## v0.8.5 (2026-05-05) — Barra de progresso do quiz com interpolação suave
+
+### Corrigido
+- **Barra do quiz parecia travar entre estágios.** Backend reportava progresso em saltos discretos (5% → 30% → 35% → 75% → 100%); a barra ficava parada 10-20s entre cada salto. Sensação de "app travou" mesmo com pipeline rodando.
+
+### Adicionado
+- **`useSmoothProgress(realPct)` hook** em `src/hooks/useSmoothProgress.ts`: entre cada checkpoint real recebido do backend, interpola visualmente em direção ao próximo ceiling estimado com curva ease-out (rápido no início, desacelera). **Nunca ultrapassa o ceiling** antes do backend mandar o update real — evita "voltar" se o pipeline for mais rápido que o esperado.
+- Estágios calibrados pelo pipeline atual (v0.8.4):
+  - 5% → ceiling 28% em ~12s (análise)
+  - 35% → ceiling 70% em ~18s (geração — etapa mais longa)
+  - 75% → ceiling 95% em ~6s (validação Haiku)
+- Mostra também **% numérico** ao lado do status pra reforçar a sensação de progresso.
+
+### Integrado em
+- `QuizSetup.tsx`: overlay de geração agora usa `smoothPct` em vez do `progress.pct` cru.
+
+### Não muda
+- Tempo total de geração: idêntico (interpolação é puramente visual).
+- Backend continua reportando os mesmos pontos discretos.
+- Pode ser reusado em outros progressos longos no futuro (ingestão, etc).
+
+---
+
 ## v0.8.4 (2026-05-05) — Quiz mais rápido (Haiku validação + análise paralela)
 
 Resolve dor reportada de "geração do quiz demora bastante". Sem mudança de qualidade do output — só pipeline mais eficiente.
