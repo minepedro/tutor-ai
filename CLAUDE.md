@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.7.2 (fundação pra escala, parte 1)** publicada — domínio plataforma-agnóstico via DI (4 violações arquiteturais resolvidas), main.ts como composition root, validação de IPC com Zod (37 handlers migrados), backlog reorganizado por categorias. Sem mudanças visíveis pro usuário. Próximo: **v0.7.3** (Drizzle migration). Plano detalhado em `docs/_internal/web-migration-plan.md`. Ver [BACKLOG](docs/BACKLOG.md).
+**v0.7.3 (fundação pra escala, parte 2)** publicada — Drizzle ORM adotado, 6 repositories migrados (1300→900 linhas), schema declarado em TS, baseline migration gerada (mas `migrate()` ainda inativo). v0.7.2 entregou DI + Zod. Sem mudanças visíveis pro usuário. Próximo: **v0.8.0** (sidebar redesign + chat fullscreen + escopo `global` — primeira migration real após Drizzle). Plano detalhado em `docs/_internal/web-migration-plan.md`. Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

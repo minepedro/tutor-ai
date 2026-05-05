@@ -934,10 +934,52 @@ Adotar **Zod** (`zod@4`):
 
 ---
 
+## ADR-040: Drizzle ORM como query builder (mantendo SQLite)
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+Em v0.7.2 e antes, repositories usavam `better-sqlite3` direto com `prepare<[args], Row>` e mappers manuais (`mapRow`) pra converter snake_case → camelCase. Apesar de funcional, tinha 3 problemas:
+
+1. **Tipo manual em 3 lugares**: `interface Row { ... }` (snake), `interface Domain { ... }` (camel), e `function mapRow()` traduzindo entre eles. ~30% do código de cada repository era boilerplate de mapeamento.
+2. **Migrations ad-hoc**: `applyMigrations` em `connection.ts` virou cadeia de `if (PRAGMA table_info → coluna não existe) ALTER TABLE...`. Bug do FTS5 em v0.6.0 foi sintoma direto disso.
+3. **Migração futura pra Postgres web** (Supabase): com queries SQL crus, refactor em 6 repositories seria mecânico mas cansativo.
+
+### Decisão
+Adotar **`drizzle-orm`** como query builder + **`drizzle-kit`** como CLI de migrations. **Mantemos SQLite por enquanto** (driver `better-sqlite3` continua); Drizzle wrappa a mesma instância.
+
+Aspectos da adoção:
+
+1. **Schema declarado em TS** (`electron/database/drizzle/schema.ts`) espelhando `schema.sql`. Drizzle infere tipos das queries automaticamente — tipos `Row` manuais e `mapRow` deletados nos 6 repositories migrados.
+
+2. **Coexistência durante transição**: `getDb()` (better-sqlite3 puro) continua disponível pra queries que Drizzle não suporta (FTS5 `MATCH` + `bm25()` em `searchChunksByFts`). `getDrizzleDb()` é o caminho default pra tudo o resto.
+
+3. **Migrations versionadas via `drizzle-kit generate`**: arquivos numerados em `electron/database/migrations/`. Baseline `0000_initial_baseline.sql` gerado e committado, **mas NÃO ativado ainda**. Razão: DBs legacy (v0.7.2 e antes) já têm tabelas; `migrate()` tentaria rodar `CREATE TABLE` sem `IF NOT EXISTS` e quebraria. Ativação fica pra v0.8.x quando uma migration nova surgir — aí justifica o bootstrap.
+
+4. **Path crítico mantido**: `schema.sql` + `applyMigrations` ad-hoc continuam o caminho de inicialização. Drizzle só substitui as **queries dos repositories** nessa fase. Garante zero risco de regressão pra DBs existentes.
+
+### Alternativas consideradas
+- **Manter SQL puro (status quo)**: ~200 linhas de boilerplate de mapeamento em 6 repos. Migration pra Postgres seria refactor mecânico mas grande.
+- **Prisma**: ORM completo, com schema próprio, runtime de geração de cliente. Pesado pra Electron (binários nativos extras), Active Record (não casa com nossa filosofia "SQL é a interface"). Descartado.
+- **Kysely**: query builder excelente, similar a Drizzle. Sem CLI integrada de migrations. Drizzle vence pelo `drizzle-kit`.
+- **Postgres direto agora**: prematuro — sem usuários, sem demanda. `web/` branch faz isso quando virar prioridade.
+
+### Consequências
++ ~30% menos código nos 6 repositories migrados (1300 → 900 linhas)
++ Tipos inferidos automaticamente do schema TypeScript
++ Schema declarado uma vez (não mais duplicado em SQL + Row interface + Domain interface)
++ `drizzle-kit generate` produz migrations SQL versionadas — caminho pronto pra ativar
++ Migração pra Postgres é trocar driver (`better-sqlite3` → `postgres-js`) + ajustar dialect — 70% das queries Drizzle funcionam idênticas
+- 1 query (FTS5 `searchChunksByFts`) mantida como SQL raw — Drizzle não modela virtual tables. Aceito.
+- Sistema de migrations versionado **não ativado ainda** — entry no BACKLOG: "ativar drizzle-kit migrate na próxima migration nova".
+- 2 dependências novas: `drizzle-orm` (~600KB) + `drizzle-kit` (devDep, ~30MB). Aceitável.
+- `getDb()` ainda existe e é usado em `connection.ts` (boot do schema) e `chunks.repo.ts` (FTS). Não é tech debt — é o ponto de integração com SQLite raw.
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-040)
+1. Próximo número (ADR-041)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta

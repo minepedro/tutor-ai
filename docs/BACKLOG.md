@@ -141,7 +141,7 @@ Suporte a PDFs escaneados/imagem via OCR no próprio app, eliminando a necessida
 
 ## Tooling / Migração
 
-- [ ] **Drizzle migration** (planejado pra v0.7.3) — substituir `better-sqlite3` direto + `applyMigrations` ad-hoc por `drizzle-orm` + `drizzle-kit`. Schema declarado em TS, migrations versionadas, mesma sintaxe quando virar Postgres web. Plano detalhado em `docs/_internal/web-migration-plan.md`.
+- [ ] **Ativar `drizzle-kit migrate` na próxima migration de schema** — Drizzle ORM já está adotado em v0.7.3 (repositórios migrados, schema TS, baseline migration gerada), mas o `migrate()` do drizzle-kit ainda **não foi ativado** porque DBs legacy (v0.7.2 e antes) quebrariam ao rodar `0000_initial_baseline.sql` (CREATE TABLE sem IF NOT EXISTS). Quando uma nova migration de schema surgir (provavelmente em v0.8.0 com `scope_type='global'`), implementar bootstrap pra DB legacy: detectar se `subjects` existe E `__drizzle_migrations` não existe → popular tracking table marcando `0000` como aplicada **sem rodar SQL** → `migrate()` aplica só as novas (`0001_*`, `0002_*`). ~1h de trabalho na hora certa.
 - [ ] **Trocar `pdf-parse` por `pdfjs-dist`** — pdf-parse 1.1.4 é dep antiga sem updates. pdfjs-dist é oficial Mozilla, mais robusto, melhor pra PDFs com layout complexo. Refactor médio porque API muda. Avaliar antes de v1.0.
 
 ## Tech Debt

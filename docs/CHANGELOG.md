@@ -4,6 +4,40 @@ Releases em ordem reversa.
 
 ---
 
+## v0.7.3 (2026-05-05) — Fundação pra escala (parte 2): Drizzle ORM
+
+Continuação da v0.7.2. Migra repositories de `better-sqlite3` puro pra
+`drizzle-orm` mantendo SQLite por enquanto. Sem mudanças visíveis pro
+usuário. Smoke test full passa.
+
+### Adicionado
+- **`drizzle-orm@0.45`** como dependency runtime, **`drizzle-kit@0.31`** como devDep
+- **`electron/database/drizzle/schema.ts`** — 12 tabelas declaradas em TypeScript, espelhando `schema.sql`. Drizzle infere tipos das queries automaticamente. Ver [ADR-040](DECISIONS.md#adr-040).
+- **`drizzle.config.ts`** na raiz — configuração do CLI (`drizzle-kit generate`)
+- **`getDrizzleDb()`** em `connection.ts` — wrapper que reusa a mesma conexão `better-sqlite3` (sem dupla conexão)
+- **`electron/database/migrations/0000_initial_baseline.sql`** — migration baseline gerada via `drizzle-kit generate`, com FTS5 + 3 triggers anexados manualmente
+
+### Mudado
+- **6 repositories migrados pra Drizzle** (`subjects`, `topics`, `sources`, `conversations`, `quizzes`, `chunks`):
+  - `prepare<[args], Row>` + `mapRow()` → `db.select().from(...).where(...).get()` com tipos inferidos
+  - Transações: `db.transaction(fn)()` → `db.transaction(tx => ...)`
+  - IN dinâmico: placeholders manuais → `inArray(field, values)`
+  - JOIN + COUNT: `LEFT JOIN ... GROUP BY` → `.leftJoin(...).groupBy(...)` + `count()` agregado
+  - Resultado: ~30% menos código (1300 → 900 linhas), tipos inferidos automaticamente
+
+### Não mudou (intencional)
+- **`schema.sql` + `applyMigrations` ad-hoc**: continuam sendo o caminho de inicialização do DB. `migrate()` do drizzle-kit **não foi ativado** — DBs legacy quebrariam (CREATE TABLE sem IF NOT EXISTS no baseline). Ativação fica pra v0.8.x quando uma migration nova surgir. Anotado em BACKLOG.
+- **`searchChunksByFts` (chunks.repo.ts)**: continua usando SQL raw via `getDb()`. Drizzle não modela `CREATE VIRTUAL TABLE` nem expressões FTS5 (`MATCH`, `bm25()`). Única exceção pós-migração.
+
+### Backlog
+- Removida entry "Sistema de migrations" — parcialmente resolvida (estrutura pronta; ativação adiada).
+- Nova entry: "Ativar drizzle-kit migrate na próxima migration de schema (bootstrap pra DB legacy)".
+
+### Próximo
+- **v0.8.0**: sidebar redesign + chat fullscreen + escopo `'global'` no schema. Será a primeira migration depois da fundação Drizzle — boa oportunidade pra ativar o sistema de migrations versionado.
+
+---
+
 ## v0.7.2 (2026-05-05) — Fundação pra escala (parte 1)
 
 Release sem mudanças visíveis pro usuário, focada em preparar o código pra eventual migração futura pra web (Next.js + Supabase). Sem regressões — smoke test full passa.
