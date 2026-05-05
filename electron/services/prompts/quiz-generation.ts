@@ -178,9 +178,25 @@ function buildUserPrompt(params: GenerationParams): string {
     }
   })();
 
-  const themeInstruction = params.themeFilter?.trim()
-    ? `\n\nFILTRO DE TEMA: gere apenas perguntas que envolvam o tema "${params.themeFilter.trim()}". Se nenhum conceito da lista cobrir esse tema, retorne array vazio.`
-    : '';
+  /*
+    Filtro de tema: aceita string única ou múltiplos temas separados por
+    vírgula (UI v0.7.1+). Múltiplos temas funcionam como OR — cada pergunta
+    pode focar em qualquer um deles.
+  */
+  const themeInstruction = (() => {
+    const raw = params.themeFilter?.trim();
+    if (!raw) return '';
+    const themes = raw
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+    if (themes.length === 0) return '';
+    if (themes.length === 1) {
+      return `\n\nFILTRO DE TEMA: gere apenas perguntas que envolvam o tema "${themes[0]}". Se nenhum conceito da lista cobrir esse tema, retorne array vazio.`;
+    }
+    const list = themes.map((t) => `"${t}"`).join(', ');
+    return `\n\nFILTRO DE TEMAS (múltiplos): gere perguntas que envolvam PELO MENOS UM dos seguintes temas: ${list}. Cada pergunta pode focar em qualquer tema da lista (interpretação OR — distribua as perguntas entre os temas quando possível). Se nenhum conceito da lista cobrir nenhum dos temas, retorne array vazio.`;
+  })();
 
   return `Conceitos extraídos do material de estudo:
 

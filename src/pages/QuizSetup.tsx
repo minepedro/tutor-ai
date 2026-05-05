@@ -29,6 +29,11 @@ export function QuizSetup() {
   const [count, setCount] = useState(COUNT_DEFAULT);
   const [types, setTypes] = useState<QuestionTypePref>('mixed');
   const [theme, setTheme] = useState('');
+  /*
+    Temas selecionados via chips (multi-seleção, v0.7.1).
+    Coexistem com o input de texto livre — combinados na hora de enviar.
+  */
+  const [selectedThemes, setSelectedThemes] = useState<Set<string>>(new Set());
   const [title, setTitle] = useState('');
   const [suggestedThemes, setSuggestedThemes] = useState<string[]>([]);
   const [loadingThemes, setLoadingThemes] = useState(false);
@@ -88,6 +93,27 @@ export function QuizSetup() {
     }
   }
 
+  /*
+    Combina texto livre + chips selecionados num filtro único, separado por
+    vírgula. O backend (quiz-generation.ts) interpreta lista como OR.
+    Dedup case-insensitive pra evitar "derivadas, Derivadas".
+  */
+  function buildThemeFilter(): string {
+    const seen = new Set<string>();
+    const all: string[] = [];
+    const add = (t: string) => {
+      const trimmed = t.trim();
+      if (trimmed.length === 0) return;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      all.push(trimmed);
+    };
+    theme.split(',').forEach(add);
+    selectedThemes.forEach(add);
+    return all.join(', ');
+  }
+
   async function handleGenerate() {
     if (!topicId || selectedSourceIds.size === 0) return;
     setThemeNotMatchedMessage(null);
@@ -98,6 +124,7 @@ export function QuizSetup() {
       sobre derivadas · 03/05/2026". Se preencheu, respeita.
     */
     const finalTitle = title.trim().length > 0 ? title.trim() : buildDefaultTitle();
+    const combinedThemes = buildThemeFilter();
 
     const result = await generation.generate({
       topicId,
@@ -105,14 +132,14 @@ export function QuizSetup() {
       count,
       types,
       title: finalTitle,
-      ...(theme.trim().length > 0 ? { themeFilter: theme.trim() } : {}),
+      ...(combinedThemes.length > 0 ? { themeFilter: combinedThemes } : {}),
     });
 
     if (!result) return; // erro já está em generation.error
 
     if (!result.themeMatched) {
       setThemeNotMatchedMessage(
-        `O tema "${theme.trim()}" não foi encontrado no material. Tente outro tema ou deixe em branco.`,
+        `O(s) tema(s) "${combinedThemes}" não foram encontrados no material. Tente outros ou deixe em branco.`,
       );
       return;
     }
@@ -124,9 +151,19 @@ export function QuizSetup() {
 
   function buildDefaultTitle(): string {
     const today = new Date().toLocaleDateString('pt-BR');
-    const themePart = theme.trim().length > 0 ? ` sobre ${theme.trim()}` : '';
+    const combined = buildThemeFilter();
+    const themePart = combined.length > 0 ? ` sobre ${combined}` : '';
     const topicName = topic?.name ?? 'tópico';
     return `Quiz de ${topicName}${themePart} · ${today}`;
+  }
+
+  function toggleSuggestedTheme(t: string) {
+    setSelectedThemes((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
   }
 
   // ── Estados de carregamento ───────────────────────────────────────────────
@@ -241,7 +278,7 @@ export function QuizSetup() {
               placeholder="Ex: derivadas, capacidade produtiva..."
               value={theme}
               onChange={(e) => setTheme(e.target.value)}
-              hint='Deixe em branco pra cobrir todo o material. Texto livre.'
+              hint="Deixe em branco pra cobrir todo o material. Texto livre — separe múltiplos temas por vírgula. Chips abaixo também valem (combinam com o texto)."
             />
             <div className="flex flex-wrap items-center gap-2">
               <Button
@@ -253,22 +290,43 @@ export function QuizSetup() {
               >
                 Sugerir temas
               </Button>
-              {suggestedThemes.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTheme(t)}
-                  className={[
-                    'rounded-full border border-border bg-surface px-3 py-1',
-                    'font-sans text-xs text-text-muted',
-                    'hover:border-accent hover:text-text',
-                    'transition-colors',
-                  ].join(' ')}
-                >
-                  {t}
-                </button>
-              ))}
+              {suggestedThemes.map((t) => {
+                const isSelected = selectedThemes.has(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => toggleSuggestedTheme(t)}
+                    aria-pressed={isSelected}
+                    className={[
+                      'rounded-full border px-3 py-1',
+                      'font-sans text-xs',
+                      'transition-colors',
+                      isSelected
+                        ? 'border-accent bg-accent/15 text-text'
+                        : 'border-border bg-surface text-text-muted hover:border-accent hover:text-text',
+                    ].join(' ')}
+                  >
+                    {isSelected ? '✓ ' : ''}
+                    {t}
+                  </button>
+                );
+              })}
             </div>
+            {selectedThemes.size > 0 && (
+              <p className="font-sans text-xs text-text-subtle">
+                {selectedThemes.size}{' '}
+                {selectedThemes.size === 1 ? 'tema selecionado' : 'temas selecionados'}
+                {' · '}
+                <button
+                  type="button"
+                  onClick={() => setSelectedThemes(new Set())}
+                  className="underline hover:text-text"
+                >
+                  limpar
+                </button>
+              </p>
+            )}
           </div>
 
           {/* ─── Número de perguntas ─── */}
