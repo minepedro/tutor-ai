@@ -73,44 +73,54 @@ export async function generateQuiz(
 
   /*
     Robustez: se 1 source falhar (Claude retorna JSON inválido, etc),
-    seguimos com as outras. Só lançamos erro se TODAS falharem. PDFs
-    bagunçados às vezes geram respostas estranhas; esse design evita
-    abortar tudo por causa de 1 arquivo problemático.
+    seguimos com as outras. Só lançamos erro se TODAS falharem.
+
+    v0.8.4: análise PARALELA via Promise.all. Sources com cache
+    `extractedConcepts` resolvem instantâneo (sem chamada API); só as
+    sem-cache disparam análise nova. Pra 5 sources sem cache:
+    - Antes (sequencial): 5×~15s = ~75s
+    - Agora (paralelo):    ~15s (limitado pela mais lenta)
+    Cuidado com rate limit 429 — Anthropic permite ~50 req/min no tier
+    inicial, bem acima do que disparamos aqui (5-10 reqs em paralelo).
   */
-  const analyses: AnalysisResult[] = [];
   const sourceErrors: Array<{ filename: string; error: string }> = [];
+  let cacheHits = 0;
 
-  for (let i = 0; i < sources.length; i++) {
-    const source = sources[i]!;
-
-    try {
-      let analysis: AnalysisResult;
-      if (source.extractedConcepts) {
-        try {
-          analysis = JSON.parse(source.extractedConcepts) as AnalysisResult;
-          onProgress(
-            5 + Math.round(((i + 1) / sources.length) * 25),
-            `Material ${i + 1}/${sources.length}: usando análise já feita…`,
-          );
-        } catch {
-          // Cache corrompido — re-analisa.
-          analysis = await analyzeAndCache(source.id, source.rawText!, (pct, status) => {
-            const slice = 5 + Math.round((i / sources.length) * 25);
-            onProgress(slice + Math.round((pct / 100) * (25 / sources.length)), status);
-          });
+  const settled = await Promise.all(
+    sources.map(async (source): Promise<AnalysisResult | null> => {
+      try {
+        // Cache hit: instantâneo
+        if (source.extractedConcepts) {
+          try {
+            const cached = JSON.parse(source.extractedConcepts) as AnalysisResult;
+            cacheHits++;
+            return cached;
+          } catch {
+            // Cache corrompido → cai pro caminho da análise
+          }
         }
-      } else {
-        analysis = await analyzeAndCache(source.id, source.rawText!, (pct, status) => {
-          const slice = 5 + Math.round((i / sources.length) * 25);
-          onProgress(slice + Math.round((pct / 100) * (25 / sources.length)), status);
-        });
+        // Análise nova (chamada Claude). Progress callback é grosso aqui
+        // porque vários rodam em paralelo — tracking individual seria ruído.
+        return await analyzeAndCache(source.id, source.rawText!, () => {});
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[quiz-generator] análise falhou pra ${source.filename}:`, err);
+        sourceErrors.push({ filename: source.filename, error: message });
+        return null;
       }
-      analyses.push(analysis);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[quiz-generator] análise falhou pra ${source.filename}:`, err);
-      sourceErrors.push({ filename: source.filename, error: message });
-    }
+    }),
+  );
+
+  const analyses = settled.filter((a): a is AnalysisResult => a !== null);
+
+  // Progress: pula direto pra 30% após análise paralela.
+  if (cacheHits === sources.length) {
+    onProgress(30, `${sources.length} ${sources.length === 1 ? 'material' : 'materiais'}: análise em cache.`);
+  } else {
+    onProgress(
+      30,
+      `Análise concluída (${analyses.length}/${sources.length} ${sources.length === 1 ? 'material' : 'materiais'}).`,
+    );
   }
 
   if (analyses.length === 0) {

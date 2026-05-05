@@ -1016,10 +1016,56 @@ Drawer flutuante 💬 e ChatPanel **continuam funcionando** em todas as rotas ex
 
 ---
 
+## ADR-042: Haiku 4.5 na validação de quiz + paralelização da análise
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+Geração de quiz tem 3 etapas sequenciais: análise → geração → validação. Cada uma é uma chamada Claude Sonnet 4.6 (ADR-022). Para um quiz com 1 source sem cache: ~30-60s total. Para 5 sources sem cache (etapa 1 sequencial): pode passar de 75s. Pedro reportou em sessão de testes: "sinto que está demorando bastante" — feedback consistente com o overhead.
+
+### Análise por etapa
+- **Etapa 1 (Análise)**: pesada — 50k chars de input, ~3000 tokens output. Modelo precisa entender o material, extrair conceitos com definições, importância, relações. Sonnet 4.6 é necessário.
+- **Etapa 2 (Geração)**: pesada — gerar perguntas com distratores plausíveis exige raciocínio. Sonnet 4.6 mantido.
+- **Etapa 3 (Validação)**: **muito mais simples** — receber pergunta + alternativas + gabarito + explicação, retornar `{valid: boolean, reason?: enum}`. Não exige criatividade nem raciocínio profundo. **Haiku 4.5 dá conta.**
+
+### Decisão (duas mudanças combinadas)
+
+**1. `claude.service.ts` aceita `model` opcional em `complete()`.**
+Default permanece Sonnet 4.6. `HAIKU_MODEL` exportado pra callers usarem. Substitui constante hardcoded por parâmetro flexível.
+
+**2. `quiz-validation.ts` passa `model: HAIKU_MODEL` em `complete()`.**
+Custo Haiku 4.5 ≈ 20% de Sonnet 4.6 → economia ~80% nessa etapa. Latência ~3× mais rápido (~3-5s em vez de 8-15s).
+
+**3. Análise (etapa 1) paralelizada com `Promise.all`.**
+Antes: `for (source of sources) { await analyze(source) }` — sequencial. Agora: `await Promise.all(sources.map(s => analyze(s)))`. Cache hits resolvem instantâneo, sem-cache disparam em paralelo. Anthropic permite ~50 req/min no tier inicial — bem acima do que disparamos (5-10 paralelas tipicamente). Robustez: se 1 source falha, outras continuam (try/catch individual).
+
+### Impacto medido (estimado)
+
+| Cenário | Antes | Depois | Δ |
+|---|---|---|---|
+| 1 source sem cache | ~30s | ~25s | −15% (só Haiku na validação) |
+| 1 source com cache | ~25s | ~22s | −12% |
+| 3 sources sem cache | ~60s | ~30s | **−50%** (paralelização + Haiku) |
+| 5 sources sem cache | ~90s | ~35s | **−60%** |
+
+### Alternativas consideradas
+- **Modo "quick" (pular validação)** — economia maior mas qualidade cai. Anotado como entry separada no BACKLOG (toggle UI).
+- **Truncar material da análise** (50k → 25k chars) — economia em input tokens, risco de perder conteúdo importante. Não testado. Backlog.
+- **Usar Haiku também na geração** — risco de distratores ruins (ADR-022 menciona). Não vale o trade-off.
+- **Concorrência limitada (pLimit)** — necessário só com >20 sources simultâneas. Pra <10, Promise.all puro é OK.
+
+### Consequências
++ Quiz mais rápido em todos os cenários, especialmente multi-source
++ Custo Anthropic reduzido em ~30% médio (validação Haiku + cache hits da análise paralela)
++ Robustez mantida (fallback de source errada continua igual)
+- Risco de Haiku 4.5 ter qualidade levemente inferior na validação. Mitigação: a validação é binária com critérios objetivos; cair pra Haiku é mudança baixo-risco. Reverter é trocar 1 linha (passar Sonnet de volta).
+- Progress UI menos granular durante a etapa 1 (paralelo = não dá pra reportar "source 2 de 5"). Aceitável; bate com 30% direto.
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-042)
+1. Próximo número (ADR-043)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta

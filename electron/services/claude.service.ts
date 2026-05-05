@@ -19,12 +19,17 @@ import { loadApiKey, type SecretStorage } from '../utils/crypto';
 */
 
 /*
-  💡 Modelo escolhido na ADR-022. Sonnet 4.6 é o equilíbrio certo de
-  qualidade vs custo/latência pra geração de quiz. Opus seria overkill;
-  Haiku falharia em distratores plausíveis. Trocar exige bumping de versão
-  e nova ADR.
+  💡 Modelo default escolhido na ADR-022. Sonnet 4.6 é o equilíbrio certo
+  de qualidade vs custo/latência pra geração de quiz, chat com RAG, e
+  análise de material. Opus seria overkill; Haiku sozinho falharia em
+  distratores plausíveis.
+
+  v0.8.4 (ADR-042): caller pode passar `model` explícito pra usar Haiku 4.5
+  em tarefas mais simples (validação binária, extração de temas leve).
+  Reduz custo + latência sem perder qualidade onde Haiku basta.
 */
-const MODEL = 'claude-sonnet-4-6';
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
+export const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_TEMPERATURE = 0.7;
 
@@ -55,6 +60,12 @@ export interface CompleteParams {
   maxTokens?: number;
   /** Default 0.7. Use 0 pra determinismo (validação). */
   temperature?: number;
+  /**
+   * Override do modelo (v0.8.4+). Default = Sonnet 4.6. Use `HAIKU_MODEL`
+   * pra tarefas simples (validação, extração leve) — ~80% mais barato e
+   * ~3× mais rápido. Ver ADR-042.
+   */
+  model?: string;
 }
 
 export interface CompleteResult {
@@ -108,7 +119,7 @@ export async function complete(params: CompleteParams): Promise<CompleteResult> 
 
   try {
     const response = await c.messages.create({
-      model: MODEL,
+      model: params.model ?? DEFAULT_MODEL,
       max_tokens: params.maxTokens ?? DEFAULT_MAX_TOKENS,
       temperature: params.temperature ?? DEFAULT_TEMPERATURE,
       ...(params.system ? { system: params.system } : {}),

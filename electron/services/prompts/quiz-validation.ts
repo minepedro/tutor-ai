@@ -1,4 +1,4 @@
-import { complete } from '../claude.service';
+import { complete, HAIKU_MODEL } from '../claude.service';
 import { parseLooseJson } from '../../utils/json-parse';
 import type { GeneratedQuestion } from './quiz-generation';
 
@@ -14,6 +14,10 @@ import type { GeneratedQuestion } from './quiz-generation';
   Aqui pedimos pro modelo revisar cada pergunta com olhar crítico e marcar
   válidas/inválidas. Não regeneramos — só filtramos. Se o usuário pediu 10
   e ficaram 8 válidas, retornamos 8 (decisão consciente: simplicidade > recall).
+
+  v0.8.4: usa Haiku 4.5 (não Sonnet 4.6). Validação binária é tarefa simples
+  o suficiente pra Haiku — economia ~80% no custo + ~3× mais rápido.
+  Ver ADR-042.
 */
 
 const SYSTEM_PROMPT = `Você é um revisor crítico de quizzes acadêmicos. Sua tarefa é avaliar perguntas e filtrar as ruins.
@@ -79,6 +83,7 @@ EXPLICAÇÃO: ${q.explanation}`;
 Avalie cada pergunta. Retorne array JSON com ${questions.length} verdicts na mesma ordem.`;
 
   const response = await complete({
+    model: HAIKU_MODEL, // v0.8.4: Haiku 4.5 — ~80% mais barato + ~3× mais rápido
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
     temperature: 0.2, // estrito, determinístico

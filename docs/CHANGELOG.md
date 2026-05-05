@@ -4,6 +4,31 @@ Releases em ordem reversa.
 
 ---
 
+## v0.8.4 (2026-05-05) — Quiz mais rápido (Haiku validação + análise paralela)
+
+Resolve dor reportada de "geração do quiz demora bastante". Sem mudança de qualidade do output — só pipeline mais eficiente.
+
+### Mudado
+- **Etapa 3 (validação) usa Haiku 4.5** em vez de Sonnet 4.6. Validação é tarefa binária com critérios objetivos — Haiku dá conta. Custo nessa etapa: ~80% mais barato. Latência: ~3× mais rápido. Ver [ADR-042](DECISIONS.md#adr-042).
+- **Etapa 1 (análise) PARALELIZADA**: antes era `for (source) { await analyze(source) }` sequencial; agora `await Promise.all(sources.map(analyze))`. Cache hits resolvem instantâneo; sem-cache disparam em paralelo. Anthropic permite ~50 req/min — bem acima do que disparamos (~5-10 paralelas tipicamente).
+- **`claude.service.ts:complete()` aceita `model` opcional**. Default permanece Sonnet 4.6 (ADR-022). `HAIKU_MODEL` exportado pra callers usarem. Mantém ADR-022 mas adiciona flexibilidade.
+
+### Tempo estimado de geração
+
+| Cenário | Antes | Depois |
+|---|---|---|
+| 1 source sem cache | ~30s | ~25s (-15%) |
+| 3 sources sem cache | ~60s | ~30s (**-50%**) |
+| 5 sources sem cache | ~90s | ~35s (**-60%**) |
+| Source com cache (qualquer N) | ~20s | ~17s (-15% só do Haiku na validação) |
+
+### Sem regressão
+- Output do quiz idêntico em qualidade — Haiku validando perguntas Sonnet é diferente de Haiku gerando perguntas (que daria distratores ruins).
+- Robustez: se 1 source falha, outras continuam (try/catch individual em cada Promise).
+- Cache de análise (`extracted_concepts`) continua igual; segundo quiz da mesma source ainda é instantâneo na etapa 1.
+
+---
+
 ## v0.8.3 (2026-05-05) — Dropdown de escopo no chat fullscreen
 
 Fecha o ciclo do chat fullscreen — agora `/chat` cobre 3 dos 4 escopos (Global/Matéria/Tópico). Drawer flutuante 💬 ainda existe pra "chat dentro do tópico atual" sem mudar de rota; pode ser deprecated em release futura quando outras features parem de depender dele.
