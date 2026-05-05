@@ -35,3 +35,6 @@ Thumbs.db
 
 # Output gerado pelos scripts de diagnóstico
 scripts/*.report.md
+
+# Notas privadas / planejamento que não vai pro repo público
+docs/_internal/
