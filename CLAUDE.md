@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.7.4 (UX hotfix)** publicada — "Sugerir temas" no QuizSetup agora demora 1-3s (vs 30-90s antes). Prompt leve dedicado + paralelização. v0.7.3 adotou Drizzle ORM (6 repositories migrados); v0.7.2 entregou DI + Zod. Próximo: **v0.8.0** (sidebar redesign + chat fullscreen + escopo `global`). Ver [BACKLOG](docs/BACKLOG.md).
+**v0.7.5 (UX hotfix #2)** publicada — cache in-memory de temas (2ª chamada gratuita) + botão "Sugerir temas" vira "↻ Atualizar" discreto quando já tem chips. v0.7.4 entregou prompt leve + paralelização (1-3s). v0.7.3 adotou Drizzle ORM. Próximo: **v0.8.0** (sidebar redesign + chat fullscreen + escopo `global`). Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

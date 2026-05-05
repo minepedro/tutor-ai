@@ -4,6 +4,31 @@ Releases em ordem reversa.
 
 ---
 
+## v0.7.5 (2026-05-05) — Cache in-memory + UX do botão "Sugerir temas"
+
+Continuação do hotfix v0.7.4. Resolve 2 problemas reportados:
+
+### Corrigido
+- **Clicar "Sugerir temas" 2x na mesma sessão gastava tokens duas vezes.** O prompt leve da v0.7.4 não cacheava o resultado em lugar nenhum. Agora há cache in-memory por `sourceId` que sobrevive durante a sessão do app — 2ª chamada na mesma source = **zero tokens, instantâneo**.
+- **Botão "Sugerir temas" continuava prominente depois dos chips aparecerem**, convidando o aluno a clicar sem querer. Agora quando já há chips, o botão vira um link discreto `↻ Atualizar temas` — não compete visualmente com os chips e ainda permite refresh manual se o aluno quiser.
+
+### Adicionado
+- `clearThemeCache(sourceId?)` em `quiz-generator.service.ts`: invalida cache pra uma source específica ou tudo.
+- Hook em `files:deleteSource` IPC: quando aluno apaga um PDF, o cache de temas dessa source também é limpo.
+
+### Mudado
+- `suggestThemes` agora tem 3 caminhos em ordem de preferência (todos paralelos via Promise.all):
+  1. Cache `extracted_concepts` no banco (gerou quiz antes) → instantâneo
+  2. Cache in-memory desta sessão (clicou "Sugerir temas" antes) → instantâneo
+  3. Prompt leve `suggestThemesFromText` → 1-3s, gasta tokens, popula caminho 2
+- UI do `QuizSetup`: botão muda dependendo do estado.
+
+### Sem mudança quando
+- Aluno gerou quiz antes na source: continua instantâneo (caminho 1, igual v0.7.3-).
+- Aluno re-ingeriu source: cache in-memory limpo automaticamente; próxima chamada gasta tokens (correto).
+
+---
+
 ## v0.7.4 (2026-05-05) — UX hotfix: "Sugerir temas" 30-90s → 1-3s
 
 ### Corrigido
