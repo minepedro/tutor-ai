@@ -100,6 +100,34 @@ Topo da coluna do meio: **seletor de escopo**:
 
 Tabela nova `conversation_scopes (conversation_id, scope_type, scope_id)` pra suportar conversas que abrangem múltiplas matérias/tópicos selecionados manualmente. UI: dropdown com checkboxes em árvore (Matéria > Tópicos).
 
+### v0.9.x ou v1.0.0 — OCR nativo no app
+
+Suporte a PDFs escaneados/imagem via OCR no próprio app, eliminando a necessidade do usuário fazer OCR externo (smallpdf, ilovepdf, Adobe).
+
+**Por que está adiado:** stack pesado e UX precisa atenção dedicada.
+
+**Stack necessário:**
+- `tesseract.js` (~5MB lib + ~25MB de modelos por idioma — PT-BR + EN baixados sob demanda)
+- `pdfjs-dist` (renderiza PDF→imagem; configuração de Vite específica em Electron)
+- `@napi-rs/canvas` (canvas Node cross-platform)
+- Total: +50MB no app empacotado
+
+**UX que precisa ser desenhada:**
+- Detecção automática: se `pdf-parse` extrair < 200 chars/página → considera escaneado
+- Tela de progresso (5-30s por página em CPU; livro 200pp = ~1h)
+- Cancelamento mid-OCR
+- Escolha de idioma (PT-BR / EN / ambos)
+- Tratamento de fórmulas matemáticas em imagem (tesseract erra muito)
+
+**Refactor médio em `ingestion.service.ts`:**
+- Extração textual normal primeiro
+- Se vazio/baixo → fallback OCR
+- Output do OCR vai direto pro pipeline de chunking existente
+
+**Estimativa:** versão dedicada (~2 sessões), provavelmente v0.9.x ou v1.0.0. Workaround atual continua válido: usar smallpdf.com/pdf-ocr externamente antes de subir.
+
+**Alternativa intermediária (simpler win):** detector de "PDF parece imagem" na ingestão que avisa o usuário sem fazer OCR — entregaria 80% do valor com 5% do trabalho. Vale considerar pra v0.8.x.
+
 ## Robustez / Segurança
 
 - [ ] **Rate limit / circuit breaker pra Anthropic API** — hoje, se um bug fizer loop em `complete()`, drena créditos da chave em minutos. Pra local solo é tolerável; pra distribuir o app pra amigos com sua chave e principalmente pra versão web é **obrigatório**. Implementação simples local: `MAX_CALLS_PER_MINUTE` em variável + contador in-memory em `claude.service.ts` (~30 linhas). Web: Upstash Redis + ratelimit middleware.
