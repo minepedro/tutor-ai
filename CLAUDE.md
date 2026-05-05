@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.7.3 (fundação pra escala, parte 2)** publicada — Drizzle ORM adotado, 6 repositories migrados (1300→900 linhas), schema declarado em TS, baseline migration gerada (mas `migrate()` ainda inativo). v0.7.2 entregou DI + Zod. Sem mudanças visíveis pro usuário. Próximo: **v0.8.0** (sidebar redesign + chat fullscreen + escopo `global` — primeira migration real após Drizzle). Plano detalhado em `docs/_internal/web-migration-plan.md`. Ver [BACKLOG](docs/BACKLOG.md).
+**v0.7.4 (UX hotfix)** publicada — "Sugerir temas" no QuizSetup agora demora 1-3s (vs 30-90s antes). Prompt leve dedicado + paralelização. v0.7.3 adotou Drizzle ORM (6 repositories migrados); v0.7.2 entregou DI + Zod. Próximo: **v0.8.0** (sidebar redesign + chat fullscreen + escopo `global`). Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

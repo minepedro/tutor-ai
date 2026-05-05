@@ -4,6 +4,27 @@ Releases em ordem reversa.
 
 ---
 
+## v0.7.4 (2026-05-05) — UX hotfix: "Sugerir temas" 30-90s → 1-3s
+
+### Corrigido
+- **Botão "Sugerir temas" no QuizSetup demorava 30-90s** quando os sources não tinham análise cacheada (1ª vez do aluno mexendo num PDF). O handler chamava `analyzeMaterial` (etapa 1 do pipeline de quiz) sequencialmente pra cada source — análise completa com 50k chars de input + ~3000 tokens de output, 10-25s por source.
+
+### Mudado
+- Novo prompt **dedicado leve** em `electron/services/prompts/theme-suggester.ts`: pede apenas 4-8 temas curtos (1-3 palavras), input truncado a 15k chars, output ~150 tokens. **~1-3s por source.**
+- `suggestThemes` em `quiz-generator.service.ts` agora:
+  1. Source com `extracted_concepts` cacheado → usa direto (instantâneo)
+  2. Source sem cache → prompt leve dedicado (não cacheia o resultado, evita desperdiçar tokens em sources que o aluno só "espiou")
+  3. Sources rodam em **paralelo** via `Promise.all` (antes era sequencial)
+- Dedup case-insensitive preservando ordem (sem mudança visível, só limpeza)
+
+### Por que não cachear o resultado do prompt leve?
+Quando o aluno clica em "Gerar quiz", a etapa 1 (análise completa) ainda roda e cacheia tudo (`extracted_concepts`). Cachear o resultado leve sobrescreveria com dado parcial. Assim o cache fica consistente com o pipeline real.
+
+### Sem regressão
+Aluno com sources já processados em quiz anterior não vê diferença — caminho do cache continua igual. Mudança só vale na 1ª vez de cada source.
+
+---
+
 ## v0.7.3 (2026-05-05) — Fundação pra escala (parte 2): Drizzle ORM
 
 Continuação da v0.7.2. Migra repositories de `better-sqlite3` puro pra
