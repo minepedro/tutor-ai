@@ -1,7 +1,9 @@
 import Database from 'better-sqlite3';
+import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import schema from './schema.sql?raw';
+import * as drizzleSchema from './drizzle/schema';
 
 /*
   💡 Singleton pattern: uma única instância do banco compartilhada por todo o
@@ -13,6 +15,7 @@ import schema from './schema.sql?raw';
   Electron — quando virar web, troca pela path equivalente do server.
 */
 let instance: Database.Database | null = null;
+let drizzleInstance: BetterSQLite3Database<typeof drizzleSchema> | null = null;
 let userDataPath: string | null = null;
 
 /**
@@ -127,9 +130,26 @@ function applyMigrations(db: Database.Database): void {
   }
 }
 
+/**
+ * Wrapper Drizzle sobre a mesma conexão `better-sqlite3` (v0.7.3+).
+ *
+ * Coexiste com `getDb()` durante a migração. Repositórios novos usam
+ * `getDrizzleDb()`; queries que precisam de SQL raw (FTS5 MATCH, PRAGMA)
+ * continuam usando `getDb()` direto.
+ *
+ * Mesma instância subjacente — sem dupla conexão. Drizzle só wrappa.
+ */
+export function getDrizzleDb(): BetterSQLite3Database<typeof drizzleSchema> {
+  if (drizzleInstance) return drizzleInstance;
+  const sqlite = getDb();
+  drizzleInstance = drizzle(sqlite, { schema: drizzleSchema });
+  return drizzleInstance;
+}
+
 export function closeDb(): void {
   if (instance) {
     instance.close();
     instance = null;
+    drizzleInstance = null;
   }
 }
