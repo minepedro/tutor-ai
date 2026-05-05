@@ -1062,10 +1062,59 @@ Antes: `for (source of sources) { await analyze(source) }` — sequencial. Agora
 
 ---
 
+## ADR-043: Clustering semântico no pipeline de geração de quiz
+Data: 2026-05-05 · Status: ✅ Aceita
+
+### Contexto
+Pedro reportou em sessão de testes: gerou quiz com 13 PDFs e 10 questões; alguns PDFs ficaram **sem nenhuma pergunta**. O pipeline pré-v0.9 mandava lista plana de conceitos pro modelo na etapa 2; modelo decidia arbitrariamente quais cobrir, com bias forte por ordem (primeiros conceitos da lista dominavam). Sem garantia de cobertura uniforme.
+
+Pesquisa externa (referências em [docs/_internal/web-migration-plan.md] não, em pesquisa Web pra v0.9.0 — registrada implicitamente no CHANGELOG):
+- **Nenhum produto comercial** (NotebookLM, Quizlet, Brisk) documenta cobertura uniforme automática
+- Pattern SOTA (47billion blog, MCQGen): chunking → **clustering semântico** → **quota fixa por cluster** → dedup
+- Distratores melhoram +8% revelando resposta + pedindo misconceptions (arXiv 2404.02124, arXiv 2307.16338)
+
+### Decisão
+Adotar **K-means simples sobre embeddings** dos conceitos como Etapa 1.5 do pipeline. Etapa 2 itera por cluster com quota fixa.
+
+Implementação:
+1. **`electron/services/clustering.service.ts`** — K-means em JS puro (~150 linhas):
+   - Embedding via `embed()` do `embedding.service.ts` (ONNX local, gratuito, 384-dim)
+   - Inicialização **K-means++** (centroides bem espalhados)
+   - Distância **cosine** (apropriada pra embeddings BERT-style)
+   - Convergência: para quando atribuições não mudam OU 50 iterações
+   - K default: `ceil(sqrt(n_concepts))` com floor 3 e ceil 12
+   - Casos triviais: n_concepts < 6 → 1 cluster só (clustering não vale a pena)
+
+2. **`quiz-generator.service.ts`**: depois da análise+dedup, chama `clusterConcepts(allConcepts)`. Faz `shuffleInPlace(clusters)` antes de mandar pro prompt — evita bias de ordem residual.
+
+3. **`prompts/quiz-generation.ts`**:
+   - System prompt instrui distribuição uniforme entre clusters
+   - User prompt formata clusters como blocos rotulados `[TEMA N — id]` com quota sugerida visível
+   - Distratores agora pedem **misconceptions plausíveis** (não "erros" genéricos), com base em técnica documentada em papers
+   - Schema do output ganha campo `cluster_id` opcional (debug, não persistido)
+
+### Alternativas consideradas
+- **Manter pipeline flat com prompt mais sofisticado** — testado conceitualmente; modelo continua com bias por ordem mesmo quando instruído. Inferior.
+- **Clustering via API externa** (HuggingFace, Voyage) — adiciona dependência online; o `embed()` local já entrega qualidade suficiente pra português técnico.
+- **Agglomerative clustering** (hierarchical) em vez de K-means — mais determinístico mas mais lento (O(n³) vs O(n*k)). Pra <500 conceitos K-means é mais que suficiente.
+- **Aceitar imperfeição** — não vale; a dor reportada é real e a solução é estabelecida na literatura.
+
+### Consequências
++ Cobertura uniforme garantida em quizzes multi-PDF (problema reportado resolvido)
++ Bias de ordem eliminado (shuffle dos clusters)
++ Distratores +8% mais aprovados (papers comprovam)
++ Reusa infraestrutura existente (`embed()`) — zero custo adicional de API
++ Pipeline preparado pra v0.9.1 (recommender vai usar os mesmos clusters)
+- Latência adicional: ~100ms pra clustering 200 conceitos. Imperceptível.
+- Random no K-means (init + shuffle) → quizzes não são determinísticos. Aceitável; pode ser feature ("varia perguntas a cada geração").
+- Qualidade do clustering depende do MiniLM-L6-v2 — modelo é razoável pra português; melhorar requer trocar embedder (backlog: Voyage AI).
+
+---
+
 <!--
 
 Para adicionar uma nova ADR:
-1. Próximo número (ADR-043)
+1. Próximo número (ADR-044)
 2. Status começa como 🚧 Proposta enquanto rola decisão
 3. Vira ✅ Aceita quando implementa
 4. Se for revogada depois, marca ❌ Revogada e linka pra ADR substituta

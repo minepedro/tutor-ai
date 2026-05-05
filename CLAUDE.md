@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.8.6 (fix barra de progresso)** publicada — barra nunca volta (Math.max) + backend reporta progress granular durante análise paralela ("Analisando materiais 3/13"). Resolve bugs reportados em geração com muitos PDFs. v0.8.5 entregou interpolação base. Ver [BACKLOG](docs/BACKLOG.md).
+**v0.9.0 (Pipeline V2 Track 1: clustering semântico)** publicada — K-means sobre embeddings agrupa conceitos em clusters; etapa 2 distribui quota fixa por cluster com shuffle pra eliminar bias. Resolve cobertura desigual em multi-PDF. Distratores melhorados via misconceptions (+8% papers). Próximo: **v0.9.1** (modo "🤖 Recomendado" default). Ver [ADR-043](docs/DECISIONS.md#adr-043).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

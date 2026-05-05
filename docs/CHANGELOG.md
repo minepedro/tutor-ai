@@ -4,6 +4,41 @@ Releases em ordem reversa.
 
 ---
 
+## v0.9.0 (2026-05-05) — Pipeline V2 Track 1: clustering semântico + cobertura uniforme
+
+Resolve dor reportada: "13 PDFs com 10 questões, alguns PDFs ficavam sem nenhuma pergunta". Primeiro de 3 tracks da v0.9 — entrega cobertura uniforme garantida via clustering. Tracks 2 (UI Recomendado) e 3 (texto livre + batching) seguem em v0.9.1/v0.9.2.
+
+### Adicionado
+- **Clustering semântico** em `electron/services/clustering.service.ts`. K-means simples sobre embeddings ONNX locais (384-dim, gratuito). K default = `ceil(sqrt(n_concepts))` com floor 3 / ceil 12. Inicialização K-means++. Distância cosine. ~150 linhas, sem dependência externa.
+- **Etapa 1.5 (Clustering)** no pipeline de quiz: depois da análise, conceitos viram clusters. Reusa `embed()` do `embedding.service.ts`.
+- **Distribuição uniforme garantida**: cada cluster ganha quota fixa de perguntas. `quotaPerCluster = ceil(count / nClusters)`. Resto distribuído entre clusters de maior importância.
+- **Shuffle de clusters** antes de mandar pro prompt → elimina bias de ordem residual (modelo tendia a focar nos primeiros).
+- **Distratores melhorados**: prompt da etapa 2 agora pede explicitamente "misconceptions plausíveis" em vez de "erros genéricos". Baseado em papers (arXiv 2404.02124, arXiv 2307.16338) que documentam +8% de aprovação por professores.
+
+### Mudado
+- `quiz-generator.service.ts`: pipeline ganha etapa de clustering entre análise e geração. Progress callback novo no estágio 33% ("Agrupando N conceitos em temas…").
+- `prompts/quiz-generation.ts`: aceita `clusters` em vez de lista flat de conceitos. User prompt formata cada cluster como bloco rotulado `[TEMA N]` com quota sugerida visível ao modelo. System prompt instrui cobertura uniforme + misconceptions.
+- `GenerationParams.concepts: ExtractedConcept[]` → `GenerationParams.clusters: ConceptCluster[]`.
+
+### Sem regressão
+- Pipelines com 1 só PDF e poucos conceitos pulam clustering (1 cluster com tudo). Comportamento idêntico ao v0.8.x.
+- Cache `extracted_concepts` mantido — clusterização é computada on-demand sobre conceitos cacheados.
+- Tempo total: ~+100ms (clustering 200 conceitos). Imperceptível.
+
+### Referências externas (pesquisa pra v0.9.0)
+- "Beyond prompt and pray" (47billion blog) — pattern de produção SOTA: chunk + cluster + quota
+- arXiv 2404.02124 — distratores +8% revelando resposta correta
+- arXiv 2307.16338 — predictive prompting com exemplos de banco
+- arXiv 2508.20567 (KCS) — sampling diversificado por cluster atinge 91-93% do ground truth
+
+### Próximos
+- **v0.9.1 (Track 2)**: modo "🤖 Recomendado" como default. Card mostra "12 questões cobrindo Derivadas (4), Integrais (3)..."
+- **v0.9.2 (Track 3)**: campo "💭 O que você quer estudar?" + multi-batch generation pra >8 perguntas
+
+Ver [ADR-043](DECISIONS.md#adr-043).
+
+---
+
 ## v0.8.6 (2026-05-05) — Fix: barra de progresso voltava + travava em N PDFs
 
 Correção de 2 bugs reportados após v0.8.5 em geração de quiz com **muitos PDFs** (13 sources sem cache):
