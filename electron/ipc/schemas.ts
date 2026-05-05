@@ -42,9 +42,11 @@ export const NonEmptyStringArraySchema = z
 /**
  * Escopo aceito nos handlers genéricos de chat (lista, create).
  * `quiz_question` fica fora — usa-se chat:askQuizDoubt direto.
+ * `global` (v0.8.0+) cobre todos os PDFs do app — `scopeId` é o literal
+ * `'global'` (necessário pro NOT NULL do schema, não usado no RAG).
  */
 export const ChatScopeSchema = z.object({
-  scopeType: z.enum(['inline', 'document', 'topic', 'subject']),
+  scopeType: z.enum(['inline', 'document', 'topic', 'subject', 'global']),
   scopeId: IdSchema,
 });
 

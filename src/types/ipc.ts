@@ -383,7 +383,8 @@ export type ChatScopeType =
   | 'document'
   | 'topic'
   | 'subject'
-  | 'quiz_question';
+  | 'quiz_question'
+  | 'global';
 export type ChatMessageRole = 'user' | 'assistant';
 
 export interface ChatScope {

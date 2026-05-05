@@ -8,6 +8,7 @@ import {
 } from '../database/repositories/chunks.repo';
 import {
   getSource,
+  listAllSources,
   listSourcesByTopic,
 } from '../database/repositories/sources.repo';
 import { listTopicsBySubject } from '../database/repositories/topics.repo';
@@ -34,7 +35,8 @@ import { listTopicsBySubject } from '../database/repositories/topics.repo';
 export type RagScope =
   | { type: 'document'; sourceId: string }
   | { type: 'topic'; topicId: string }
-  | { type: 'subject'; subjectId: string };
+  | { type: 'subject'; subjectId: string }
+  | { type: 'global' };
 
 export interface RagChunk {
   chunkId: string;
@@ -225,6 +227,7 @@ function reciprocalRankFusion(
  * - document: o próprio sourceId
  * - topic: todas as sources daquele tópico
  * - subject: todas as sources de todos os tópicos da matéria
+ * - global (v0.8.0+): TODAS as sources do app, em qualquer matéria/tópico
  */
 function resolveSourceIds(scope: RagScope): string[] {
   switch (scope.type) {
@@ -236,6 +239,8 @@ function resolveSourceIds(scope: RagScope): string[] {
       const topics = listTopicsBySubject(scope.subjectId);
       return topics.flatMap((t) => listSourcesByTopic(t.id).map((s) => s.id));
     }
+    case 'global':
+      return listAllSources().map((s) => s.id);
   }
 }
 

@@ -100,6 +100,18 @@ export function listSourcesByTopic(topicId: string): Source[] {
   return rows.map(normalize);
 }
 
+/**
+ * Lista TODAS as sources (todos tópicos, todas matérias). Usada pelo escopo
+ * global do chat (v0.8.0+) — RAG cobre tudo que o aluno subiu.
+ */
+export function listAllSources(): Source[] {
+  const rows = selectSourceWithCount()
+    .groupBy(sources.id)
+    .orderBy(sql`${sources.createdAt} DESC`)
+    .all();
+  return rows.map(normalize);
+}
+
 export function getSource(id: string): Source | null {
   const row = selectSourceWithCount()
     .where(eq(sources.id, id))

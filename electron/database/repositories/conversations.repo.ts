@@ -21,7 +21,8 @@ export type ScopeType =
   | 'document'
   | 'topic'
   | 'subject'
-  | 'quiz_question';
+  | 'quiz_question'
+  | 'global';
 export type MessageRole = 'user' | 'assistant';
 
 export interface Message {

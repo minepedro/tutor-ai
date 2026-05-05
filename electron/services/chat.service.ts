@@ -175,6 +175,10 @@ function conversationScopeToRagScope(
       return { type: 'topic', topicId: scopeId };
     case 'subject':
       return { type: 'subject', subjectId: scopeId };
+    case 'global':
+      // v0.8.0: scopeId é literal 'global' (não usado no RAG, mas necessário
+      // pro NOT NULL do schema). RAG cobre TODAS as sources.
+      return { type: 'global' };
     case 'inline':
       throw new Error(
         'Escopo "inline" não é suportado nesta versão (planejado pra v0.5+).',
