@@ -191,20 +191,39 @@ export async function generateQuiz(
   };
 }
 
+/*
+  Cache in-memory dos temas leves por source. Sobrevive durante a sessão do
+  app — clicar "Sugerir temas" 2x na mesma source = ZERO tokens da 2ª vez.
+  Limpado quando source é re-ingerida ou deletada.
+
+  Nota: este cache existe APENAS pro caminho leve (suggestThemesFromText).
+  O caminho do `extracted_concepts` (banco) tem prioridade e cobre o caso
+  "aluno já gerou quiz dessa source antes".
+*/
+const lightThemeCache = new Map<string, string[]>();
+
+/**
+ * Limpa o cache de temas leves. Chamar quando uma source é deletada ou
+ * re-ingerida (rawText mudou → temas potencialmente diferentes).
+ *
+ * Sem argumento: limpa tudo. Com sourceId: limpa só essa.
+ */
+export function clearThemeCache(sourceId?: string): void {
+  if (sourceId) lightThemeCache.delete(sourceId);
+  else lightThemeCache.clear();
+}
+
 /**
  * Sugere temas baseado no material das sources, sem gerar quiz.
  * Usado pelo botão "Sugerir temas" no QuizSetup.
  *
- * v0.7.4: refatorado pra ser RÁPIDO (~1-3s vs 30-90s antes):
- * - Source com cache `extracted_concepts` → instantâneo (lê JSON local)
- * - Source sem cache → roda prompt LEVE (`suggestThemesFromText`) que pede
- *   só temas (~150 tokens out, 15k chars in) em vez da análise completa
- *   (~3k tokens out, 50k chars in).
- * - Sources rodam em PARALELO via `Promise.all`.
- *
- * O cache de análise completa só é populado quando o aluno clica em
- * "Gerar quiz" (o pipeline real ainda roda `analyzeMaterial`). Isso evita
- * desperdiçar tokens em sources que o aluno só "espiou" sem gerar quiz.
+ * Caminhos (em ordem de preferência, todos paralelos via Promise.all):
+ *   1. Cache `extracted_concepts` no banco (source já foi usada em quiz)
+ *      → instantâneo, ZERO tokens
+ *   2. Cache in-memory de tema leve (resultado de "Sugerir temas" anterior
+ *      nessa sessão) → instantâneo, ZERO tokens (v0.7.5+)
+ *   3. Prompt leve `suggestThemesFromText` → ~1-3s, gasta tokens.
+ *      Resultado vai pro cache in-memory (próxima chamada será grátis).
  */
 export async function suggestThemes(sourceIds: string[]): Promise<string[]> {
   const themesArrays = await Promise.all(
@@ -212,18 +231,24 @@ export async function suggestThemes(sourceIds: string[]): Promise<string[]> {
       const source = getSource(id);
       if (!source || source.rawText === null) return [];
 
-      // Caminho 1: cache existe — instantâneo
+      // Caminho 1: cache no banco
       if (source.extractedConcepts) {
         try {
           const cached = JSON.parse(source.extractedConcepts) as AnalysisResult;
           return cached.suggestedThemes.map((t) => t.trim());
         } catch {
-          // Cache corrompido — cai pro caminho leve
+          // Cache corrompido — cai pro próximo
         }
       }
 
-      // Caminho 2: prompt leve dedicado (sem cachear)
-      return suggestThemesFromText(source.rawText);
+      // Caminho 2: cache in-memory desta sessão (v0.7.5+)
+      const inMemory = lightThemeCache.get(id);
+      if (inMemory) return inMemory;
+
+      // Caminho 3: roda prompt leve e cacheia em memória
+      const themes = await suggestThemesFromText(source.rawText);
+      lightThemeCache.set(id, themes);
+      return themes;
     }),
   );
 

@@ -281,15 +281,38 @@ export function QuizSetup() {
               hint="Deixe em branco pra cobrir todo o material. Texto livre — separe múltiplos temas por vírgula. Chips abaixo também valem (combinam com o texto)."
             />
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleSuggestThemes}
-                loading={loadingThemes}
-                disabled={selectedSourceIds.size === 0}
-              >
-                Sugerir temas
-              </Button>
+              {/*
+                v0.7.5: quando ainda não há chips, mostra botão "Sugerir
+                temas" prominente. Quando já há chips, troca pra um link
+                discreto "↻ Atualizar" — evita que o aluno clique sem
+                querer e gaste tokens (apesar do cache in-memory deixar a
+                2ª chamada gratuita pras mesmas sources, fica mais limpo).
+              */}
+              {suggestedThemes.length === 0 ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleSuggestThemes}
+                  loading={loadingThemes}
+                  disabled={selectedSourceIds.size === 0}
+                >
+                  Sugerir temas
+                </Button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSuggestThemes}
+                  disabled={loadingThemes || selectedSourceIds.size === 0}
+                  className={[
+                    'font-sans text-xs text-text-muted underline',
+                    'hover:text-text disabled:opacity-40',
+                    'transition-colors',
+                  ].join(' ')}
+                  title="Pedir ao Claude pra sugerir temas de novo (usa cache se nada mudou)"
+                >
+                  {loadingThemes ? '↻ Atualizando…' : '↻ Atualizar temas'}
+                </button>
+              )}
               {suggestedThemes.map((t) => {
                 const isSelected = selectedThemes.has(t);
                 return (

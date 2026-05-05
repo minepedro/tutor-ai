@@ -15,6 +15,7 @@ import {
 } from '../database/repositories/sources.repo';
 import { getTopic } from '../database/repositories/topics.repo';
 import { deleteChunkVectorsBySource } from '../database/repositories/chunks.repo';
+import { clearThemeCache } from '../services/quiz-generator.service';
 import { IdSchema, NonEmptyStringArraySchema, parseInput } from './schemas';
 
 const UploadFromPathsSchema = z.object({
@@ -88,6 +89,9 @@ export function registerFilesHandlers(): void {
 
     // 2. Apaga a linha em sources (CASCADE limpa document_chunks no SQLite).
     deleteSource(id);
+
+    // 3. Invalida cache in-memory de temas (v0.7.5).
+    clearThemeCache(id);
 
     // 3. Se nenhuma outra source referencia este arquivo no disco, apaga.
     if (countSourcesByFilePath(source.filePath) === 0 && existsSync(source.filePath)) {
