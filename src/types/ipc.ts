@@ -159,6 +159,12 @@ export interface Source {
   extractedConcepts: string | null;
   /** Número de chunks indexados. 0 enquanto o pipeline de ingestão não rodou. */
   chunkCount: number;
+  /**
+   * Heurística (v0.8.3+): true se a extração de texto extraiu pouquíssimo
+   * conteúdo (< 500 chars) — sinal forte de PDF escaneado/imagem. UI mostra
+   * badge ⚠️ sugerindo OCR externo.
+   */
+  extractionLikelyFailed: boolean;
   createdAt: string;
 }
 

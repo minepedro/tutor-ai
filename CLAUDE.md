@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.8.0 (sidebar Notion-style + chat fullscreen + escopo global)** publicada — sidebar com árvore expansível de matérias/tópicos, rota `/chat` com chat fullscreen 2 colunas, escopo `'global'` que busca em TODOS os PDFs. Drawer flutuante 💬 mantido em outras rotas (não /chat) — coexistência intencional, dropdown de escopo no /chat fica pra v0.8.1+. Ver [BACKLOG](docs/BACKLOG.md).
+**v0.8.2 (detector PDF imagem)** publicada — badge ⚠️ no SourceCard quando `rawText < 500 chars` (PDF escaneado/imagem). Warning detalhado com link pro smallpdf. v0.8.0 entregou sidebar Notion-style + chat fullscreen + escopo global. Próximo: dropdown de escopo no /chat (v0.8.3) ou otimizações do quiz. Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

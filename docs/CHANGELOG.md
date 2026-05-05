@@ -4,6 +4,23 @@ Releases em ordem reversa.
 
 ---
 
+## v0.8.2 (2026-05-05) — Detector de PDF imagem (warning na ingestão)
+
+Resolve a confusão reportada na sessão de testes (PDF "5S" tinha quase tudo em imagem; chat respondia "não encontrei isso no material" sem o aluno entender por quê).
+
+### Adicionado
+- **Heurística `extractionLikelyFailed`** em `Source` (computada, não persistida em coluna nova): true quando `rawText !== null && rawText.length < 500`. Threshold de 500 chars cobre PDFs claramente escaneados sem dar falso-positivo em PDFs legítimos curtos (1 pág A4 ≈ 2k+ chars).
+- **Badge ⚠️ no `SourceCard`** ao lado do filename quando flag true. Tooltip explica o problema.
+- **Warning detalhado** abaixo do card com link clicável pro [smallpdf.com/pdf-ocr](https://smallpdf.com/pdf-ocr) (workaround sem OCR nativo no app — esse fica pra v0.9+).
+
+### Mudado
+- `Source` interface ganha campo `extractionLikelyFailed: boolean` em `electron/database/repositories/sources.repo.ts` e `src/types/ipc.ts`. Campo é **derivado** (calculado em `normalize()`) — não exige migration de schema.
+
+### Por que heurística simples
+PDF.js retornaria 0 chars pra PDF totalmente imagem. Pdf-parse (que usamos) retorna parcialmente em PDFs mistos. Threshold 500 cobre os 2 casos sem persistência adicional. Quando OCR nativo entrar (v0.9+, ver BACKLOG), a heurística vira gatilho automático do fallback.
+
+---
+
 ## v0.8.1 (2026-05-05) — Fix: botão duplicado no ChatPage
 
 ### Corrigido

@@ -18,6 +18,8 @@ export function SourceCard({ source, progress, onDelete }: Props) {
   const isProcessing = progress !== undefined;
   // "Pendente" = upload feito mas ingestão ainda não rodou (sem rawText e sem progresso ativo)
   const isPending = !isProcessing && source.rawText === null;
+  // PDF imagem: ingestão completou mas extraiu pouco texto (v0.8.3+)
+  const showImagePdfWarning = !isProcessing && source.extractionLikelyFailed;
 
   return (
     <div className="group flex flex-col gap-2 rounded-[10px] border border-border bg-bg-elevated px-4 py-3 transition-colors hover:border-accent/40">
@@ -25,9 +27,23 @@ export function SourceCard({ source, progress, onDelete }: Props) {
         <span className="text-2xl leading-none">{FILE_TYPE_ICON[source.fileType] ?? '📄'}</span>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate font-sans text-sm font-medium text-text" title={source.filename}>
-            {source.filename}
-          </p>
+          <div className="flex items-center gap-1.5">
+            <p
+              className="truncate font-sans text-sm font-medium text-text"
+              title={source.filename}
+            >
+              {source.filename}
+            </p>
+            {showImagePdfWarning && (
+              <span
+                className="cursor-help text-warning"
+                title="Pouco texto foi extraído desse PDF — provavelmente é escaneado/imagem. Pra melhores resultados, faça OCR antes (ex: smallpdf.com/pdf-ocr) e re-suba o arquivo."
+                aria-label="PDF parece escaneado"
+              >
+                ⚠️
+              </span>
+            )}
+          </div>
           <p className="font-sans text-xs text-text-subtle">
             {source.fileType.toUpperCase()} · {formatDate(source.createdAt)} ·{' '}
             <SourceStatus source={source} progress={progress} />
@@ -65,6 +81,23 @@ export function SourceCard({ source, progress, onDelete }: Props) {
       {isPending && (
         <p className="font-sans text-xs text-warning">
           Processamento pendente — exclua e re-suba o arquivo para reindexar.
+        </p>
+      )}
+
+      {/* PDF imagem: aviso explicativo mais visível com link pro workaround */}
+      {showImagePdfWarning && (
+        <p className="font-sans text-xs leading-relaxed text-warning">
+          ⚠️ Pouco texto foi extraído. Se esse PDF é escaneado/imagem, faça OCR
+          antes (gratuito em{' '}
+          <a
+            href="https://smallpdf.com/pdf-ocr"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-warning/80"
+          >
+            smallpdf.com/pdf-ocr
+          </a>
+          ) e re-suba o arquivo.
         </p>
       )}
     </div>

@@ -30,8 +30,20 @@ export interface Source {
   extractedConcepts: string | null;
   /** Número de chunks indexados. 0 enquanto o pipeline não rodou. */
   chunkCount: number;
+  /**
+   * Heurística (v0.8.3+): true se a ingestão completou (rawText !== null) MAS
+   * extraiu pouquíssimo texto — sinal forte de PDF escaneado/imagem onde
+   * `pdf-parse` não consegue extrair (ele não roda OCR). UI mostra badge ⚠️
+   * sugerindo OCR externo.
+   *
+   * Threshold: 500 chars cobre PDFs claramente vazios e mantém margem ampla
+   * pra evitar falso-positivo em PDFs legítimos curtos (1 pág A4 ≈ 2k+ chars).
+   */
+  extractionLikelyFailed: boolean;
   createdAt: string;
 }
+
+const EXTRACTION_FAILED_THRESHOLD = 500;
 
 export interface CreateSourceInput {
   topicId: string;
@@ -61,6 +73,8 @@ function normalize(row: SourceRow): Source {
     rawText: row.rawText,
     extractedConcepts: row.extractedConcepts,
     chunkCount: row.chunkCount,
+    extractionLikelyFailed:
+      row.rawText !== null && row.rawText.length < EXTRACTION_FAILED_THRESHOLD,
     createdAt: row.createdAt,
   };
 }
