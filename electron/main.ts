@@ -1,7 +1,11 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import { join } from 'node:path';
-import { getDb, closeDb } from './database/connection';
-import { initChunksTable } from './database/lancedb';
+import { getDb, closeDb, configureDatabasePath } from './database/connection';
+import { initChunksTable, configureLanceDbPath } from './database/lancedb';
+import { configureEmbeddingService } from './services/embedding.service';
+import { configureClaudeService } from './services/claude.service';
+import { ElectronSafeStorage } from './adapters/electron-secret-storage';
+import type { SecretStorage } from './utils/crypto';
 import { registerSettingsHandlers } from './ipc/settings.ipc';
 import { registerSetupHandlers } from './ipc/setup.ipc';
 import { registerSubjectsHandlers } from './ipc/subjects.ipc';
@@ -11,6 +15,27 @@ import { registerFilesHandlers } from './ipc/files.ipc';
 import { registerEmbeddingsHandlers } from './ipc/embeddings.ipc';
 import { registerQuizzesHandlers } from './ipc/quizzes.ipc';
 import { registerChatHandlers } from './ipc/chat.ipc';
+
+/*
+  Composition root (v0.7.2). main.ts é o ÚNICO lugar que conhece tanto
+  Electron quanto os services de domínio. Aqui injetamos:
+  - userDataPath em DB connection, LanceDB, embedding.service
+  - SecretStorage adapter no claude.service
+  Os services e repositories ficam livres de imports de 'electron'.
+*/
+
+let secretStorage: SecretStorage | null = null;
+let userDataPath: string | null = null;
+
+export function getSecretStorage(): SecretStorage {
+  if (!secretStorage) throw new Error('SecretStorage não inicializado');
+  return secretStorage;
+}
+
+export function getUserDataPath(): string {
+  if (!userDataPath) throw new Error('userDataPath não inicializado');
+  return userDataPath;
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -88,8 +113,22 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(async () => {
+  // ── Composition root ─────────────────────────────────────────────────
+  // 1. Resolve dependências de plataforma
+  userDataPath = app.getPath('userData');
+  secretStorage = new ElectronSafeStorage();
+
+  // 2. Injeta nos services/repositories agnósticos
+  configureDatabasePath(userDataPath);
+  configureLanceDbPath(userDataPath);
+  configureEmbeddingService(userDataPath);
+  configureClaudeService(secretStorage, userDataPath);
+
+  // 3. Bootstrap dos data stores
   getDb(); // inicializa o banco SQLite e cria as tabelas
   await initChunksTable(); // inicializa a tabela de vetores no LanceDB
+
+  // 4. CSP, IPC, janela
   configureCsp();
   registerIpcHandlers();
   createWindow();

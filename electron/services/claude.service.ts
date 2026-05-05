@@ -1,19 +1,21 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { loadApiKey } from '../utils/crypto';
+import { loadApiKey, type SecretStorage } from '../utils/crypto';
 
 /*
   Wrapper interno (main process) pra API da Anthropic.
 
   Por que esse arquivo existe?
-  - Centraliza a leitura da API key (via safeStorage) em 1 lugar.
+  - Centraliza a leitura da API key em 1 lugar.
   - Aplica defaults (modelo, max_tokens) consistentes.
   - Traduz erros do SDK pra mensagens em português que a UI pode mostrar.
   - Cliente é singleton lazy: criado na primeira chamada, reaproveita HTTP keep-alive.
 
   Renderer NÃO chama esse service direto (não tem IPC pra ele). Apenas outros
-  services do main (quiz-generator, futuramente rag/chat) o usam. Isso garante
-  que a API key nunca vaza pro renderer e que cada feature tem seu próprio IPC
-  com superfície focada (quiz:generate, chat:sendMessage, etc).
+  services do main o usam.
+
+  v0.7.2: este service é plataforma-agnóstico. Recebe `SecretStorage` +
+  `userDataPath` via `configureClaudeService(...)` chamado no composition root
+  (main.ts dentro de app.whenReady). Sem imports de 'electron' aqui.
 */
 
 /*
@@ -27,6 +29,22 @@ const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_TEMPERATURE = 0.7;
 
 let client: Anthropic | null = null;
+let secretStorage: SecretStorage | null = null;
+let userDataPath: string | null = null;
+
+/**
+ * Configura o service com dependências de plataforma. Chamar no
+ * composition root (main.ts dentro de app.whenReady) ANTES de qualquer
+ * chamada a `complete()` ou `ping()`.
+ */
+export function configureClaudeService(
+  storage: SecretStorage,
+  userData: string,
+): void {
+  secretStorage = storage;
+  userDataPath = userData;
+  client = null; // descarta cliente se reconfigurar
+}
 
 export interface CompleteParams {
   /** Prompt de sistema (instruções/persona). Opcional. */
@@ -54,8 +72,13 @@ export interface CompleteResult {
 
 function getClient(): Anthropic {
   if (client) return client;
+  if (!secretStorage || !userDataPath) {
+    throw new Error(
+      'claude.service não configurado. Chame configureClaudeService() no boot.',
+    );
+  }
 
-  const key = loadApiKey();
+  const key = loadApiKey(secretStorage, userDataPath);
   if (!key) {
     throw new Error(
       'API key da Anthropic não configurada. Vá em Settings e cole sua chave.',

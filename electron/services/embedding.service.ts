@@ -1,4 +1,3 @@
-import { app } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ort from 'onnxruntime-node';
@@ -20,8 +19,12 @@ import type { PreTrainedTokenizer } from '@xenova/transformers';
   de um módulo ESM lança ERR_REQUIRE_ESM. `import()` (com parênteses) funciona
   em ambos os formatos porque é uma chamada assíncrona que respeita ESM.
 
-  Cache do tokenizer: `userData/models/transformers-cache/`. Os arquivos do
+  Cache do tokenizer: `<userDataPath>/models/transformers-cache/`. Os arquivos do
   tokenizer (~1MB) são baixados na primeira chamada, depois reutilizados.
+
+  v0.7.2: service plataforma-agnóstico. Caller injeta `userDataPath` via
+  `configureEmbeddingService()` ANTES da primeira chamada. Sem imports de
+  Electron aqui — quando virar web, troca pela path equivalente.
 */
 
 const TOKENIZER_REPO = 'Xenova/all-MiniLM-L6-v2';
@@ -31,9 +34,23 @@ const HIDDEN_SIZE = 384;
 let session: ort.InferenceSession | null = null;
 let tokenizer: PreTrainedTokenizer | null = null;
 let transformersConfigured = false;
+let userDataPath: string | null = null;
+
+export function configureEmbeddingService(path: string): void {
+  userDataPath = path;
+}
+
+function requirePath(): string {
+  if (!userDataPath) {
+    throw new Error(
+      'embedding.service não configurado. Chame configureEmbeddingService() no boot.',
+    );
+  }
+  return userDataPath;
+}
 
 export function getModelPath(): string {
-  return join(app.getPath('userData'), 'models', 'all-MiniLM-L6-v2.onnx');
+  return join(requirePath(), 'models', 'all-MiniLM-L6-v2.onnx');
 }
 
 export function isModelReady(): boolean {
@@ -65,7 +82,7 @@ async function getTokenizer(): Promise<PreTrainedTokenizer> {
 
   if (!transformersConfigured) {
     transformers.env.cacheDir = join(
-      app.getPath('userData'),
+      requirePath(),
       'models',
       'transformers-cache',
     );

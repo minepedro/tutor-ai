@@ -1,67 +1,87 @@
-import { safeStorage, app } from 'electron';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EncryptionStatus } from '@shared/ipc';
 
 /*
-  safeStorage do Electron encripta dados usando o mecanismo nativo do SO:
-  - Windows: DPAPI (Data Protection API) — vinculado ao usuário do Windows
-  - macOS: Keychain
-  - Linux: libsecret / kwallet (se disponível), senão sem encriptação real
+  Storage de API key, plataforma-agnóstico (v0.7.2).
 
-  Se `safeStorage.isEncryptionAvailable()` retornar false (Linux sem keyring),
-  salvamos em plaintext com um aviso — melhor do que não funcionar.
+  Encriptação OS-backed depende do Electron `safeStorage`, que importa de
+  `'electron'`. Pra manter este módulo livre de Electron (regra de domínio
+  agnóstico — ver ADR-038), expomos uma interface `SecretStorage` que o caller
+  injeta. A implementação concreta com Electron vive em
+  `electron/adapters/electron-secret-storage.ts` — único lugar permitido a
+  importar `safeStorage`/`app` fora de `main.ts`/`preload.ts`/`ipc/`.
+
+  Em ambientes onde encriptação não está disponível (Linux sem keyring,
+  testes, ambiente futuro web/Node-only), a implementação retorna `null`/
+  `false` e este módulo cai num fallback base64 (ofuscação simples — UI
+  mostra aviso de segurança).
 */
 
-function getKeyFilePath(): string {
-  return join(app.getPath('userData'), '.apikey');
+export interface SecretStorage {
+  /** True se o backend pode encriptar. False → cai no fallback ofuscado. */
+  isAvailable(): boolean;
+  /** Retorna buffer encriptado ou null se não disponível. */
+  encrypt(plaintext: string): Buffer | null;
+  /** Retorna texto desencriptado ou null se falhar/não disponível. */
+  decrypt(cipher: Buffer): string | null;
 }
 
-export function getEncryptionStatus(): EncryptionStatus {
-  if (!safeStorage.isEncryptionAvailable()) return 'unavailable';
-  // No Linux, safeStorage pode estar disponível mas em modo "basic" (sem keyring).
-  // isEncryptionAvailable() retorna true nesses casos — tratamos como os-backed.
-  return 'os-backed';
+function getKeyFilePath(userDataPath: string): string {
+  return join(userDataPath, '.apikey');
 }
 
-export function saveApiKey(key: string): void {
-  const filePath = getKeyFilePath();
+export function getEncryptionStatus(storage: SecretStorage): EncryptionStatus {
+  return storage.isAvailable() ? 'os-backed' : 'unavailable';
+}
 
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(key);
+export function saveApiKey(
+  storage: SecretStorage,
+  userDataPath: string,
+  key: string,
+): void {
+  const filePath = getKeyFilePath(userDataPath);
+
+  const encrypted = storage.encrypt(key);
+  if (encrypted) {
     writeFileSync(filePath, encrypted);
   } else {
-    // Fallback: salva em base64 (ofuscado, não encriptado).
-    // O renderer vai mostrar um aviso de segurança nesse caso.
+    // Fallback ofuscado (não encriptado). UI mostra aviso de segurança.
     writeFileSync(filePath, Buffer.from(key).toString('base64'), 'utf-8');
   }
 }
 
-export function loadApiKey(): string | null {
-  const filePath = getKeyFilePath();
+export function loadApiKey(
+  storage: SecretStorage,
+  userDataPath: string,
+): string | null {
+  const filePath = getKeyFilePath(userDataPath);
   if (!existsSync(filePath)) return null;
 
   try {
     const data = readFileSync(filePath);
-
-    if (safeStorage.isEncryptionAvailable()) {
-      // data é um Buffer com os bytes encriptados
-      return safeStorage.decryptString(data);
-    } else {
-      // Fallback: decodifica base64
-      return Buffer.from(data.toString('utf-8'), 'base64').toString('utf-8');
+    if (storage.isAvailable()) {
+      return storage.decrypt(data);
     }
+    // Fallback: decodifica base64
+    return Buffer.from(data.toString('utf-8'), 'base64').toString('utf-8');
   } catch {
-    // Arquivo corrompido ou encriptado com outra conta — ignora e retorna null.
+    // Arquivo corrompido ou encriptado com outra conta.
     return null;
   }
 }
 
-export function hasApiKey(): boolean {
-  return existsSync(getKeyFilePath()) && loadApiKey() !== null;
+export function hasApiKey(
+  storage: SecretStorage,
+  userDataPath: string,
+): boolean {
+  return (
+    existsSync(getKeyFilePath(userDataPath)) &&
+    loadApiKey(storage, userDataPath) !== null
+  );
 }
 
-export function deleteApiKey(): void {
-  const filePath = getKeyFilePath();
+export function deleteApiKey(userDataPath: string): void {
+  const filePath = getKeyFilePath(userDataPath);
   if (existsSync(filePath)) rmSync(filePath);
 }

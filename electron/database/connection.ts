@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import { app } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import schema from './schema.sql?raw';
@@ -8,13 +7,29 @@ import schema from './schema.sql?raw';
   💡 Singleton pattern: uma única instância do banco compartilhada por todo o
   processo main. A variável `instance` guarda a conexão aberta; nas chamadas
   seguintes `getDb()` retorna ela sem reabrir o arquivo.
+
+  v0.7.2: o caller injeta o `userDataPath` via `configureDatabasePath()`
+  ANTES da primeira chamada a `getDb()`. Isso desacopla o módulo de
+  Electron — quando virar web, troca pela path equivalente do server.
 */
 let instance: Database.Database | null = null;
+let userDataPath: string | null = null;
+
+/**
+ * Configura o caminho do diretório de dados. Chamar no composition root
+ * (main.ts dentro de app.whenReady) ANTES da primeira chamada a `getDb()`.
+ */
+export function configureDatabasePath(path: string): void {
+  userDataPath = path;
+}
 
 export function getDb(): Database.Database {
   if (instance) return instance;
-
-  const userDataPath = app.getPath('userData');
+  if (!userDataPath) {
+    throw new Error(
+      'Database não configurado. Chame configureDatabasePath() no boot.',
+    );
+  }
 
   if (!existsSync(userDataPath)) {
     mkdirSync(userDataPath, { recursive: true });

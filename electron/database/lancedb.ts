@@ -1,4 +1,3 @@
-import { app } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as lancedb from '@lancedb/lancedb';
@@ -8,14 +7,27 @@ import * as lancedb from '@lancedb/lancedb';
   Helpers de leitura/escrita de chunks vivem em `repositories/chunks.repo.ts`
   (centralizam SQLite + LanceDB no mesmo módulo, já que chunk é a entidade
   conceitual que existe em ambos os stores).
+
+  v0.7.2: caller injeta `userDataPath` via `configureLanceDbPath()` ANTES
+  da primeira chamada a `getLanceDb()`. Sem imports de Electron aqui.
 */
 
 let dbInstance: lancedb.Connection | null = null;
+let userDataPath: string | null = null;
+
+export function configureLanceDbPath(path: string): void {
+  userDataPath = path;
+}
 
 export async function getLanceDb(): Promise<lancedb.Connection> {
   if (dbInstance) return dbInstance;
+  if (!userDataPath) {
+    throw new Error(
+      'LanceDB não configurado. Chame configureLanceDbPath() no boot.',
+    );
+  }
 
-  const embeddingsPath = join(app.getPath('userData'), 'embeddings');
+  const embeddingsPath = join(userDataPath, 'embeddings');
   if (!existsSync(embeddingsPath)) {
     mkdirSync(embeddingsPath, { recursive: true });
   }
