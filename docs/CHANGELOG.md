@@ -4,6 +4,14 @@ Releases em ordem reversa.
 
 ---
 
+## v0.8.1 (2026-05-05) — Fix: botão duplicado no ChatPage
+
+### Corrigido
+- ChatPage tinha **dois botões "+ Nova conversa"**: um redundante adicionado no header da coluna esquerda + o botão interno do `ChatConversationList`. Removido o do header — `ChatConversationList` já renderiza o seu próprio.
+- Limpeza: import `Button` órfão removido.
+
+---
+
 ## v0.8.0 (2026-05-05) — Sidebar Notion-style + Chat fullscreen + escopo global
 
 ### Adicionado

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
-import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { ChatMessage } from '@/components/chat/ChatMessage';
@@ -77,29 +76,23 @@ export function ChatPage() {
       <Header title="Chat" subtitle="🌐 Buscando em todo o seu material" />
 
       <main className="flex flex-1 overflow-hidden">
-        {/* Coluna 1: lista de conversas */}
-        <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-bg">
-          <div className="border-b border-border p-3">
-            <Button onClick={handleCreate} disabled={conversations.loading}>
-              + Nova conversa
-            </Button>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {conversations.error ? (
-              <div className="m-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 font-sans text-sm text-danger">
-                {conversations.error}
-              </div>
-            ) : (
-              <ChatConversationList
-                conversations={conversations.conversations}
-                loading={conversations.loading}
-                onSelect={setSelected}
-                onCreate={handleCreate}
-                onRename={openRename}
-                onDelete={setDeleteTarget}
-              />
-            )}
-          </div>
+        {/* Coluna 1: lista de conversas. ChatConversationList já renderiza
+            o botão "+ Nova conversa" interno — não duplicar aqui. */}
+        <aside className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-bg">
+          {conversations.error ? (
+            <div className="m-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 font-sans text-sm text-danger">
+              {conversations.error}
+            </div>
+          ) : (
+            <ChatConversationList
+              conversations={conversations.conversations}
+              loading={conversations.loading}
+              onSelect={setSelected}
+              onCreate={handleCreate}
+              onRename={openRename}
+              onDelete={setDeleteTarget}
+            />
+          )}
         </aside>
 
         {/* Coluna 2: mensagens */}
