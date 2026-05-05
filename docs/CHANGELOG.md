@@ -4,6 +4,27 @@ Releases em ordem reversa.
 
 ---
 
+## v0.8.3 (2026-05-05) — Dropdown de escopo no chat fullscreen
+
+Fecha o ciclo do chat fullscreen — agora `/chat` cobre 3 dos 4 escopos (Global/Matéria/Tópico). Drawer flutuante 💬 ainda existe pra "chat dentro do tópico atual" sem mudar de rota; pode ser deprecated em release futura quando outras features parem de depender dele.
+
+### Adicionado
+- **`ScopeSelector` component** em `src/components/chat/ScopeSelector.tsx`: dropdown único com lista aninhada de Global → Matérias → Tópicos. Click fora fecha. Itens da matéria também são clicáveis (pra escolher matéria inteira). Funciona como label + estado controlado.
+- **Filtro de escopo no `/chat`**: header da coluna esquerda ganha "Buscar em [escopo]" com seletor. Trocar de escopo:
+  - Re-busca lista de conversas filtrada
+  - Deseleciona a conversa atual (não pertence ao novo escopo)
+  - Define escopo de novas conversas criadas a seguir
+- **Carregamento eager** de subjects + tópicos no mount da ChatPage (1 query subjects + N queries topics em paralelo via `Promise.all`). Necessário pra alimentar o dropdown sem lazy loading que atrapalharia a UX.
+
+### Mudado
+- ChatPage: escopo virou state em vez de constante. Default ainda é `global`.
+- Empty state da coluna direita adapta texto baseado no escopo selecionado.
+
+### Sem mudança
+- Conversas existentes continuam fixas no escopo em que foram criadas (já era assim — backend deriva escopo da conversa). Trocar escopo só filtra a lista; conversas antigas de outros escopos ficam invisíveis enquanto outro escopo está ativo (mas voltam quando você seleciona o escopo delas).
+
+---
+
 ## v0.8.2 (2026-05-05) — Detector de PDF imagem (warning na ingestão)
 
 Resolve a confusão reportada na sessão de testes (PDF "5S" tinha quase tudo em imagem; chat respondia "não encontrei isso no material" sem o aluno entender por quê).

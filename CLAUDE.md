@@ -1,7 +1,7 @@
 # tutor.ai — Contexto
 
 ## Estado atual
-**v0.8.2 (detector PDF imagem)** publicada — badge ⚠️ no SourceCard quando `rawText < 500 chars` (PDF escaneado/imagem). Warning detalhado com link pro smallpdf. v0.8.0 entregou sidebar Notion-style + chat fullscreen + escopo global. Próximo: dropdown de escopo no /chat (v0.8.3) ou otimizações do quiz. Ver [BACKLOG](docs/BACKLOG.md).
+**v0.8.3 (dropdown de escopo no /chat)** publicada — ScopeSelector permite trocar entre Global/Matéria/Tópico. Cada conversa fixa no escopo de criação; filtro só altera a lista visível. v0.8.2 entregou detector de PDF imagem; v0.8.0 entregou sidebar Notion-style + chat fullscreen. Próximo: validação real (uso) ou otimizações do quiz. Ver [BACKLOG](docs/BACKLOG.md).
 Última sessão: 2026-05-05
 
 ## O que é este projeto

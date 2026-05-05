@@ -5,20 +5,25 @@ import { Input } from '@/components/ui/Input';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { ChatConversationList } from '@/components/chat/ChatConversationList';
+import { ScopeSelector } from '@/components/chat/ScopeSelector';
 import { useChat } from '@/hooks/useChat';
 import { useConversations } from '@/hooks/useConversations';
-import type { ChatScope, ConversationSummary } from '@/types/ipc';
+import { useIPC } from '@/hooks/useIPC';
+import type {
+  ChatScope,
+  ConversationSummary,
+  Subject,
+  Topic,
+} from '@/types/ipc';
 
 /*
-  Chat fullscreen (v0.8.0+).
+  Chat fullscreen (v0.8.0+, dropdown de escopo em v0.8.3).
 
   Layout 2 colunas: lista de conversas | mensagens.
-  (A 3ª coluna do plano original — "fontes" — fica inline na ChatMessage
-  via ChatSources, igual o drawer atual. Coluna lateral dedicada pode
-  vir em v0.8.1 se for útil.)
 
-  Escopo default: GLOBAL (busca em todos os PDFs). Pra v0.8.0, escopo é
-  fixo em global; troca pra topic/subject vai pra v0.8.1+.
+  Escopo default: GLOBAL. Aluno pode trocar pra Matéria/Tópico via
+  ScopeSelector no topo. Cada conversa fica fixa no escopo em que foi
+  criada (já é assim — backend deriva escopo da conversation).
 
   scope_id pra global é o literal 'global' — exigido pelo NOT NULL do
   schema de conversations.scope_id mas não é usado pelo RAG.
@@ -27,8 +32,47 @@ import type { ChatScope, ConversationSummary } from '@/types/ipc';
 const GLOBAL_SCOPE: ChatScope = { scopeType: 'global', scopeId: 'global' };
 
 export function ChatPage() {
+  const api = useIPC();
+  const [scope, setScope] = useState<ChatScope>(GLOBAL_SCOPE);
   const [selected, setSelected] = useState<string | null>(null);
-  const conversations = useConversations(GLOBAL_SCOPE);
+  const conversations = useConversations(scope);
+
+  // Carrega subjects + topics pra alimentar o ScopeSelector (1× no mount)
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [topicsBySubject, setTopicsBySubject] = useState<Record<string, Topic[]>>({});
+  const [scopeLoading, setScopeLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const subs = await api.subjects.list();
+        if (cancelled) return;
+        setSubjects(subs);
+
+        const topicsMap: Record<string, Topic[]> = {};
+        await Promise.all(
+          subs.map(async (s) => {
+            const ts = await api.topics.listBySubject(s.id);
+            topicsMap[s.id] = ts;
+          }),
+        );
+        if (cancelled) return;
+        setTopicsBySubject(topicsMap);
+      } finally {
+        if (!cancelled) setScopeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  // Ao trocar escopo, deseleciona a conversa atual (não pertence ao novo escopo)
+  function handleScopeChange(newScope: ChatScope) {
+    setScope(newScope);
+    setSelected(null);
+  }
 
   const [renameTarget, setRenameTarget] = useState<ConversationSummary | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -73,26 +117,42 @@ export function ChatPage() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <Header title="Chat" subtitle="🌐 Buscando em todo o seu material" />
+      <Header title="Chat" />
 
       <main className="flex flex-1 overflow-hidden">
-        {/* Coluna 1: lista de conversas. ChatConversationList já renderiza
-            o botão "+ Nova conversa" interno — não duplicar aqui. */}
-        <aside className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-bg">
-          {conversations.error ? (
-            <div className="m-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 font-sans text-sm text-danger">
-              {conversations.error}
-            </div>
-          ) : (
-            <ChatConversationList
-              conversations={conversations.conversations}
-              loading={conversations.loading}
-              onSelect={setSelected}
-              onCreate={handleCreate}
-              onRename={openRename}
-              onDelete={setDeleteTarget}
+        {/* Coluna 1: lista de conversas */}
+        <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-bg">
+          {/* ScopeSelector no topo: filtra a lista de conversas + define
+              escopo de novas conversas */}
+          <div className="flex flex-col gap-1.5 border-b border-border p-3">
+            <p className="font-sans text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+              Buscar em
+            </p>
+            <ScopeSelector
+              scope={scope}
+              onChange={handleScopeChange}
+              subjects={subjects}
+              topicsBySubject={topicsBySubject}
+              loading={scopeLoading}
             />
-          )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {conversations.error ? (
+              <div className="m-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 font-sans text-sm text-danger">
+                {conversations.error}
+              </div>
+            ) : (
+              <ChatConversationList
+                conversations={conversations.conversations}
+                loading={conversations.loading}
+                onSelect={setSelected}
+                onCreate={handleCreate}
+                onRename={openRename}
+                onDelete={setDeleteTarget}
+              />
+            )}
+          </div>
         </aside>
 
         {/* Coluna 2: mensagens */}
@@ -104,12 +164,13 @@ export function ChatPage() {
               <div className="max-w-md">
                 <p className="mb-3 text-5xl">💬</p>
                 <p className="font-sans text-base font-semibold text-text">
-                  Pergunte sobre todo o seu material
+                  {scope.scopeType === 'global'
+                    ? 'Pergunte sobre todo o seu material'
+                    : 'Pergunte sobre o material do escopo selecionado'}
                 </p>
                 <p className="mt-2 font-sans text-sm text-text-muted">
-                  Esse chat busca em <strong>todos os PDFs</strong> que você subiu —
-                  qualquer matéria, qualquer tópico. Crie uma nova conversa ou abra uma
-                  existente na lista ao lado.
+                  Crie uma nova conversa ou abra uma existente na lista ao
+                  lado. Pra mudar de escopo, use o seletor "Buscar em".
                 </p>
               </div>
             </div>
