@@ -1,4 +1,5 @@
 import { ipcMain, dialog, app, BrowserWindow } from 'electron';
+import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, stat, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -14,6 +15,12 @@ import {
 } from '../database/repositories/sources.repo';
 import { getTopic } from '../database/repositories/topics.repo';
 import { deleteChunkVectorsBySource } from '../database/repositories/chunks.repo';
+import { IdSchema, NonEmptyStringArraySchema, parseInput } from './schemas';
+
+const UploadFromPathsSchema = z.object({
+  topicId: IdSchema,
+  paths: NonEmptyStringArraySchema,
+});
 
 /*
   Upload de arquivos. Estratégia:
@@ -38,12 +45,10 @@ export function registerFilesHandlers(): void {
     sources processadas (pode ser vazia se cancelou ou nada foi escolhido).
   */
   ipcMain.handle('files:pickAndUpload', async (event, topicId: unknown) => {
-    if (typeof topicId !== 'string') {
-      throw new Error('files:pickAndUpload exige topicId (string)');
-    }
+    const id = parseInput(IdSchema, topicId);
 
-    const topic = getTopic(topicId);
-    if (!topic) throw new Error(`Tópico ${topicId} não encontrado`);
+    const topic = getTopic(id);
+    if (!topic) throw new Error(`Tópico ${id} não encontrado`);
 
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const result = await dialog.showOpenDialog(win!, {
@@ -56,7 +61,7 @@ export function registerFilesHandlers(): void {
       return [];
     }
 
-    return uploadFiles(topicId, result.filePaths);
+    return uploadFiles(id, result.filePaths);
   });
 
   /*
@@ -64,32 +69,25 @@ export function registerFilesHandlers(): void {
     via webUtils.getPathForFile no preload). Mesma lógica de upload em série.
   */
   ipcMain.handle('files:uploadFromPaths', async (_event, topicId: unknown, paths: unknown) => {
-    if (typeof topicId !== 'string') {
-      throw new Error('files:uploadFromPaths exige topicId (string)');
-    }
-    if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) {
-      throw new Error('files:uploadFromPaths exige paths (string[])');
-    }
+    const parsed = parseInput(UploadFromPathsSchema, { topicId, paths });
 
-    const topic = getTopic(topicId);
-    if (!topic) throw new Error(`Tópico ${topicId} não encontrado`);
+    const topic = getTopic(parsed.topicId);
+    if (!topic) throw new Error(`Tópico ${parsed.topicId} não encontrado`);
 
-    return uploadFiles(topicId, paths);
+    return uploadFiles(parsed.topicId, parsed.paths);
   });
 
   ipcMain.handle('files:deleteSource', async (_event, sourceId: unknown) => {
-    if (typeof sourceId !== 'string') {
-      throw new Error('files:deleteSource exige sourceId (string)');
-    }
+    const id = parseInput(IdSchema, sourceId);
 
-    const source = getSource(sourceId);
-    if (!source) throw new Error(`Source ${sourceId} não encontrada`);
+    const source = getSource(id);
+    if (!source) throw new Error(`Source ${id} não encontrada`);
 
     // 1. LanceDB primeiro (não tem FK cascade — precisa explicit cleanup).
-    await deleteChunkVectorsBySource(sourceId);
+    await deleteChunkVectorsBySource(id);
 
     // 2. Apaga a linha em sources (CASCADE limpa document_chunks no SQLite).
-    deleteSource(sourceId);
+    deleteSource(id);
 
     // 3. Se nenhuma outra source referencia este arquivo no disco, apaga.
     if (countSourcesByFilePath(source.filePath) === 0 && existsSync(source.filePath)) {

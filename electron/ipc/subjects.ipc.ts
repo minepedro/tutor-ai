@@ -1,74 +1,48 @@
 import { ipcMain } from 'electron';
+import { z } from 'zod';
 import {
   listSubjects,
   getSubject,
   createSubject,
   updateSubject,
   deleteSubject,
-  type CreateSubjectInput,
-  type UpdateSubjectInput,
 } from '../database/repositories/subjects.repo';
-import { isObject } from '../utils/type-guards';
+import { IdSchema, parseInput } from './schemas';
+
+const CreateSubjectSchema = z.object({
+  name: z.string().min(1),
+  color: z.string().optional(),
+  emoji: z.string().optional(),
+});
+
+const UpdateSubjectSchema = z.object({
+  name: z.string().min(1).optional(),
+  color: z.string().optional(),
+  emoji: z.string().optional(),
+});
+
+const UpdateArgsSchema = z.object({
+  id: IdSchema,
+  patch: UpdateSubjectSchema,
+});
 
 export function registerSubjectsHandlers(): void {
   ipcMain.handle('subjects:list', () => listSubjects());
 
   ipcMain.handle('subjects:get', (_event, id: unknown) => {
-    if (typeof id !== 'string') throw new Error('subjects:get exige id (string)');
-    return getSubject(id);
+    return getSubject(parseInput(IdSchema, id));
   });
 
   ipcMain.handle('subjects:create', (_event, input: unknown) => {
-    return createSubject(parseCreateInput(input));
+    return createSubject(parseInput(CreateSubjectSchema, input));
   });
 
   ipcMain.handle('subjects:update', (_event, id: unknown, patch: unknown) => {
-    if (typeof id !== 'string') throw new Error('subjects:update exige id (string)');
-    return updateSubject(id, parseUpdateInput(patch));
+    const parsed = parseInput(UpdateArgsSchema, { id, patch });
+    return updateSubject(parsed.id, parsed.patch);
   });
 
   ipcMain.handle('subjects:delete', (_event, id: unknown) => {
-    if (typeof id !== 'string') throw new Error('subjects:delete exige id (string)');
-    deleteSubject(id);
+    deleteSubject(parseInput(IdSchema, id));
   });
-}
-
-function parseCreateInput(value: unknown): CreateSubjectInput {
-  if (!isObject(value)) throw new Error('subjects:create exige um objeto');
-
-  const name = value['name'];
-  if (typeof name !== 'string') throw new Error('Campo "name" é obrigatório');
-
-  const color = value['color'];
-  if (color !== undefined && typeof color !== 'string') {
-    throw new Error('Campo "color" deve ser string');
-  }
-
-  const emoji = value['emoji'];
-  if (emoji !== undefined && typeof emoji !== 'string') {
-    throw new Error('Campo "emoji" deve ser string');
-  }
-
-  return { name, color, emoji };
-}
-
-function parseUpdateInput(value: unknown): UpdateSubjectInput {
-  if (!isObject(value)) throw new Error('subjects:update exige um objeto patch');
-
-  const patch: UpdateSubjectInput = {};
-
-  if (value['name'] !== undefined) {
-    if (typeof value['name'] !== 'string') throw new Error('Campo "name" deve ser string');
-    patch.name = value['name'];
-  }
-  if (value['color'] !== undefined) {
-    if (typeof value['color'] !== 'string') throw new Error('Campo "color" deve ser string');
-    patch.color = value['color'];
-  }
-  if (value['emoji'] !== undefined) {
-    if (typeof value['emoji'] !== 'string') throw new Error('Campo "emoji" deve ser string');
-    patch.emoji = value['emoji'];
-  }
-
-  return patch;
 }

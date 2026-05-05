@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron';
+import { z } from 'zod';
 import {
   createQuiz,
   getQuiz,
@@ -11,7 +12,11 @@ import {
 } from '../database/repositories/quizzes.repo';
 import { generateQuiz, suggestThemes } from '../services/quiz-generator.service';
 import { getTopic } from '../database/repositories/topics.repo';
-import { isObject } from '../utils/type-guards';
+import {
+  IdSchema,
+  NonEmptyStringArraySchema,
+  parseInput,
+} from './schemas';
 
 /*
   Handlers do quiz. O `quizzes:generate` é o ponto crítico: chama o pipeline
@@ -19,9 +24,35 @@ import { isObject } from '../utils/type-guards';
   progresso via webContents.send (mesmo padrão de embeddings).
 */
 
+// ── Schemas Zod ─────────────────────────────────────────────────────────
+
+const GenerateQuizSchema = z.object({
+  topicId: IdSchema,
+  sourceIds: NonEmptyStringArraySchema,
+  count: z.number().int().min(3).max(30),
+  types: z.enum(['multiple_choice', 'true_false', 'mixed']),
+  themeFilter: z.string().trim().optional(),
+  title: z.string().optional(),
+});
+
+const AnswerQuestionSchema = z.object({
+  questionId: IdSchema,
+  selectedIndex: z.number().int().nonnegative(),
+});
+
+const FinishQuizSchema = z.object({
+  quizId: IdSchema,
+  timeSpentSeconds: z.number().nonnegative().finite(),
+});
+
+const RenameQuizSchema = z.object({
+  id: IdSchema,
+  title: z.string(),
+});
+
 export function registerQuizzesHandlers(): void {
   ipcMain.handle('quizzes:generate', async (event, input: unknown) => {
-    const params = parseGenerateInput(input);
+    const params = parseInput(GenerateQuizSchema, input);
 
     // Tópico tem que existir.
     const topic = getTopic(params.topicId);
@@ -35,12 +66,17 @@ export function registerQuizzesHandlers(): void {
     // Quiz mode: hardcoded 'quality' na v0.3.0 (ADR diz: sem modo quick).
     const quizMode = 'quality' as const;
 
+    const themeFilter =
+      params.themeFilter && params.themeFilter.length > 0
+        ? params.themeFilter
+        : undefined;
+
     const result = await generateQuiz(
       {
         sourceIds: params.sourceIds,
         count: params.count,
         types: params.types,
-        ...(params.themeFilter ? { themeFilter: params.themeFilter } : {}),
+        ...(themeFilter ? { themeFilter } : {}),
       },
       reportProgress,
     );
@@ -82,121 +118,47 @@ export function registerQuizzesHandlers(): void {
   });
 
   ipcMain.handle('quizzes:suggestThemes', async (_event, sourceIds: unknown) => {
-    if (!Array.isArray(sourceIds) || sourceIds.some((id) => typeof id !== 'string')) {
-      throw new Error('quizzes:suggestThemes exige sourceIds (string[])');
-    }
-    return suggestThemes(sourceIds);
+    const parsed = parseInput(NonEmptyStringArraySchema, sourceIds);
+    return suggestThemes(parsed);
   });
 
   ipcMain.handle('quizzes:get', (_event, id: unknown) => {
-    if (typeof id !== 'string') throw new Error('quizzes:get exige id (string)');
-    return getQuiz(id);
+    return getQuiz(parseInput(IdSchema, id));
   });
 
   ipcMain.handle('quizzes:listByTopic', (_event, topicId: unknown) => {
-    if (typeof topicId !== 'string') {
-      throw new Error('quizzes:listByTopic exige topicId (string)');
-    }
-    return listQuizzesByTopic(topicId);
+    return listQuizzesByTopic(parseInput(IdSchema, topicId));
   });
 
-  ipcMain.handle('quizzes:answer', (_event, questionId: unknown, selectedIndex: unknown) => {
-    if (typeof questionId !== 'string') {
-      throw new Error('quizzes:answer exige questionId (string)');
-    }
-    if (
-      typeof selectedIndex !== 'number' ||
-      !Number.isInteger(selectedIndex) ||
-      selectedIndex < 0
-    ) {
-      throw new Error('quizzes:answer exige selectedIndex (inteiro >= 0)');
-    }
-    return answerQuestion(questionId, selectedIndex);
-  });
+  ipcMain.handle(
+    'quizzes:answer',
+    (_event, questionId: unknown, selectedIndex: unknown) => {
+      const parsed = parseInput(AnswerQuestionSchema, {
+        questionId,
+        selectedIndex,
+      });
+      return answerQuestion(parsed.questionId, parsed.selectedIndex);
+    },
+  );
 
-  ipcMain.handle('quizzes:finish', (_event, quizId: unknown, timeSpentSeconds: unknown) => {
-    if (typeof quizId !== 'string') {
-      throw new Error('quizzes:finish exige quizId (string)');
-    }
-    if (
-      typeof timeSpentSeconds !== 'number' ||
-      !Number.isFinite(timeSpentSeconds) ||
-      timeSpentSeconds < 0
-    ) {
-      throw new Error('quizzes:finish exige timeSpentSeconds (number >= 0)');
-    }
-    return finishQuiz(quizId, Math.round(timeSpentSeconds));
-  });
+  ipcMain.handle(
+    'quizzes:finish',
+    (_event, quizId: unknown, timeSpentSeconds: unknown) => {
+      const parsed = parseInput(FinishQuizSchema, { quizId, timeSpentSeconds });
+      return finishQuiz(parsed.quizId, Math.round(parsed.timeSpentSeconds));
+    },
+  );
 
   ipcMain.handle('quizzes:delete', (_event, id: unknown) => {
-    if (typeof id !== 'string') throw new Error('quizzes:delete exige id (string)');
-    deleteQuiz(id);
+    deleteQuiz(parseInput(IdSchema, id));
   });
 
   ipcMain.handle('quizzes:reset', (_event, id: unknown) => {
-    if (typeof id !== 'string') throw new Error('quizzes:reset exige id (string)');
-    return resetQuiz(id);
+    return resetQuiz(parseInput(IdSchema, id));
   });
 
   ipcMain.handle('quizzes:rename', (_event, id: unknown, title: unknown) => {
-    if (typeof id !== 'string') throw new Error('quizzes:rename exige id (string)');
-    if (typeof title !== 'string') throw new Error('quizzes:rename exige title (string)');
-    return renameQuiz(id, title);
+    const parsed = parseInput(RenameQuizSchema, { id, title });
+    return renameQuiz(parsed.id, parsed.title);
   });
-}
-
-interface ParsedGenerateInput {
-  topicId: string;
-  sourceIds: string[];
-  count: number;
-  types: 'multiple_choice' | 'true_false' | 'mixed';
-  themeFilter?: string;
-  title?: string;
-}
-
-function parseGenerateInput(value: unknown): ParsedGenerateInput {
-  if (!isObject(value)) throw new Error('quizzes:generate exige um objeto');
-
-  const topicId = value['topicId'];
-  if (typeof topicId !== 'string') throw new Error('topicId é obrigatório');
-
-  const sourceIds = value['sourceIds'];
-  if (
-    !Array.isArray(sourceIds) ||
-    sourceIds.length === 0 ||
-    sourceIds.some((s) => typeof s !== 'string')
-  ) {
-    throw new Error('sourceIds deve ser array não-vazio de strings');
-  }
-
-  const count = value['count'];
-  if (typeof count !== 'number' || !Number.isInteger(count) || count < 3 || count > 30) {
-    throw new Error('count deve ser inteiro entre 3 e 30');
-  }
-
-  const types = value['types'];
-  if (types !== 'multiple_choice' && types !== 'true_false' && types !== 'mixed') {
-    throw new Error('types inválido');
-  }
-
-  const themeFilter = value['themeFilter'];
-  if (themeFilter !== undefined && typeof themeFilter !== 'string') {
-    throw new Error('themeFilter deve ser string');
-  }
-
-  const title = value['title'];
-  if (title !== undefined && typeof title !== 'string') {
-    throw new Error('title deve ser string');
-  }
-
-  return {
-    topicId,
-    sourceIds,
-    count,
-    types,
-    ...(themeFilter && themeFilter.trim().length > 0
-      ? { themeFilter: themeFilter.trim() }
-      : {}),
-    ...(title ? { title } : {}),
-  };
 }

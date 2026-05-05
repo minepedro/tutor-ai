@@ -3,6 +3,7 @@ import {
   listSourcesByTopic,
   getSource,
 } from '../database/repositories/sources.repo';
+import { IdSchema, parseInput } from './schemas';
 
 /*
   Handlers read-only de sources. As operações que envolvem efeitos colaterais
@@ -10,14 +11,10 @@ import {
 */
 export function registerSourcesHandlers(): void {
   ipcMain.handle('sources:listByTopic', (_event, topicId: unknown) => {
-    if (typeof topicId !== 'string') {
-      throw new Error('sources:listByTopic exige topicId (string)');
-    }
-    return listSourcesByTopic(topicId);
+    return listSourcesByTopic(parseInput(IdSchema, topicId));
   });
 
   ipcMain.handle('sources:get', (_event, id: unknown) => {
-    if (typeof id !== 'string') throw new Error('sources:get exige id (string)');
-    return getSource(id);
+    return getSource(parseInput(IdSchema, id));
   });
 }
