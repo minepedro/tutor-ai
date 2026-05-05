@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { getDb } from '../connection';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { getDb, getDrizzleDb } from '../connection';
 import { getLanceDb } from '../lancedb';
+import { documentChunks } from '../drizzle/schema';
 
 /*
   Chunks de documento — armazenam o TEXTO no SQLite e o VETOR no LanceDB.
@@ -13,6 +15,10 @@ import { getLanceDb } from '../lancedb';
   ON DELETE CASCADE no schema cuida de limpar chunks SQLite quando a source
   some. Os vetores LanceDB são sincronizados manualmente em `files.ipc.ts`
   e no pipeline de ingestão (LanceDB não tem FK).
+
+  v0.7.3: migrado pra Drizzle, com 1 EXCEÇÃO importante — a query FTS5 (MATCH +
+  bm25) continua como SQL raw via `getDb().prepare()`. Drizzle não modela
+  CREATE VIRTUAL TABLE nem expressões FTS5 declarativamente.
 */
 
 export interface DocumentChunk {
@@ -36,6 +42,117 @@ export interface CreateChunkInput {
   structuralLabel?: string | null;
 }
 
+function normalize(row: typeof documentChunks.$inferSelect): DocumentChunk {
+  return {
+    id: row.id,
+    sourceId: row.sourceId,
+    chunkIndex: row.chunkIndex ?? 0,
+    content: row.content,
+    pageNumber: row.pageNumber,
+    tokenCount: row.tokenCount ?? 0,
+    structuralLabel: row.structuralLabel,
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * Insere muitos chunks numa única transação. Retorna a lista de IDs na mesma
+ * ordem dos inputs.
+ */
+export function createChunksBatch(
+  inputs: Array<CreateChunkInput & { id?: string }>,
+): string[] {
+  const db = getDrizzleDb();
+  const ids: string[] = [];
+
+  db.transaction((tx) => {
+    for (const input of inputs) {
+      const id = input.id ?? randomUUID();
+      tx.insert(documentChunks)
+        .values({
+          id,
+          sourceId: input.sourceId,
+          chunkIndex: input.chunkIndex,
+          content: input.content,
+          pageNumber: input.pageNumber ?? null,
+          tokenCount: input.tokenCount,
+          structuralLabel: input.structuralLabel ?? null,
+        })
+        .run();
+      ids.push(id);
+    }
+  });
+
+  return ids;
+}
+
+export function listChunksBySource(sourceId: string): DocumentChunk[] {
+  const db = getDrizzleDb();
+  return db
+    .select()
+    .from(documentChunks)
+    .where(eq(documentChunks.sourceId, sourceId))
+    .orderBy(asc(documentChunks.chunkIndex))
+    .all()
+    .map(normalize);
+}
+
+/**
+ * Busca múltiplos chunks por uma lista de IDs. Usado pelo RAG depois da
+ * busca vetorial: o LanceDB devolve top-K ids; aqui pegamos texto + metadados.
+ */
+export function getChunksByIds(ids: string[]): DocumentChunk[] {
+  if (ids.length === 0) return [];
+  const db = getDrizzleDb();
+  return db
+    .select()
+    .from(documentChunks)
+    .where(inArray(documentChunks.id, ids))
+    .all()
+    .map(normalize);
+}
+
+/**
+ * Busca chunks que tenham um `structural_label` específico, dentro de um
+ * conjunto de sources (escopo do RAG). Usado pra filtro estrutural —
+ * "exercício 5" filtra direto, sem passar por embedding.
+ */
+export function listChunksByStructuralLabel(
+  sourceIds: string[],
+  structuralLabel: string,
+): DocumentChunk[] {
+  if (sourceIds.length === 0) return [];
+  const db = getDrizzleDb();
+  return db
+    .select()
+    .from(documentChunks)
+    .where(
+      and(
+        inArray(documentChunks.sourceId, sourceIds),
+        eq(documentChunks.structuralLabel, structuralLabel),
+      ),
+    )
+    .orderBy(asc(documentChunks.sourceId), asc(documentChunks.chunkIndex))
+    .all()
+    .map(normalize);
+}
+
+/**
+ * Item retornado pela busca FTS — chunk + posição no ranking BM25.
+ */
+export interface FtsResult {
+  chunk: DocumentChunk;
+  /** Posição 0-based no ranking BM25. */
+  rank: number;
+}
+
+/**
+ * Full-text search nos chunks dentro de um escopo (lista de sources).
+ *
+ * Drizzle não modela FTS5 (`MATCH`, `bm25()`, `document_chunks_fts` virtual).
+ * Mantemos esta função usando better-sqlite3 direto com SQL raw — a única
+ * exceção dentro de um repository pós-migração v0.7.3.
+ */
 interface ChunkRow {
   id: string;
   source_id: string;
@@ -47,7 +164,7 @@ interface ChunkRow {
   created_at: string;
 }
 
-function mapRow(row: ChunkRow): DocumentChunk {
+function mapFtsRow(row: ChunkRow): DocumentChunk {
   return {
     id: row.id,
     sourceId: row.source_id,
@@ -60,125 +177,6 @@ function mapRow(row: ChunkRow): DocumentChunk {
   };
 }
 
-/**
- * Insere muitos chunks numa única transação. Retorna a lista de IDs na mesma
- * ordem dos inputs. Cada input pode opcionalmente já ter um `id`; se não tiver,
- * geramos um UUID.
- *
- * 💡 Transações em better-sqlite3: `db.transaction(fn)` envolve as chamadas
- * dentro de fn em um BEGIN/COMMIT atômico. Se qualquer insert falhar, faz
- * rollback automático.
- */
-export function createChunksBatch(
-  inputs: Array<CreateChunkInput & { id?: string }>,
-): string[] {
-  const db = getDb();
-  const stmt = db.prepare(
-    `INSERT INTO document_chunks
-       (id, source_id, chunk_index, content, page_number, token_count, structural_label)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  );
-
-  const ids: string[] = [];
-
-  const insertAll = db.transaction((items: typeof inputs) => {
-    for (const input of items) {
-      const id = input.id ?? randomUUID();
-      stmt.run(
-        id,
-        input.sourceId,
-        input.chunkIndex,
-        input.content,
-        input.pageNumber ?? null,
-        input.tokenCount,
-        input.structuralLabel ?? null,
-      );
-      ids.push(id);
-    }
-  });
-
-  insertAll(inputs);
-  return ids;
-}
-
-export function listChunksBySource(sourceId: string): DocumentChunk[] {
-  const stmt = getDb().prepare<[string], ChunkRow>(
-    `SELECT id, source_id, chunk_index, content, page_number, token_count, structural_label, created_at
-     FROM document_chunks
-     WHERE source_id = ?
-     ORDER BY chunk_index ASC`,
-  );
-  return stmt.all(sourceId).map(mapRow);
-}
-
-/**
- * Busca múltiplos chunks por uma lista de IDs. Usado pelo RAG depois da
- * busca vetorial: o LanceDB devolve top-K ids; aqui pegamos o `content`
- * (texto) e demais metadados de cada um.
- *
- * 💡 Construímos a cláusula IN dinamicamente com placeholders. Como better-sqlite3
- * exige o número exato de `?` na query preparada, geramos uma string de N
- * marcadores baseado no tamanho do array. Como os IDs vão por bind (parâmetros),
- * não há risco de injection.
- */
-export function getChunksByIds(ids: string[]): DocumentChunk[] {
-  if (ids.length === 0) return [];
-  const placeholders = ids.map(() => '?').join(',');
-  const stmt = getDb().prepare<string[], ChunkRow>(
-    `SELECT id, source_id, chunk_index, content, page_number, token_count, structural_label, created_at
-     FROM document_chunks
-     WHERE id IN (${placeholders})`,
-  );
-  return stmt.all(...ids).map(mapRow);
-}
-
-/**
- * Busca chunks que tenham um `structural_label` específico, dentro de um
- * conjunto de sources (escopo do RAG). Usado pra filtro estrutural —
- * "exercício 5" filtra direto, sem passar por embedding.
- *
- * Retorna ordenado por (source_id, chunk_index) pra preservar ordem original
- * do material quando há múltiplas sources/cópias do mesmo label.
- */
-export function listChunksByStructuralLabel(
-  sourceIds: string[],
-  structuralLabel: string,
-): DocumentChunk[] {
-  if (sourceIds.length === 0) return [];
-  const placeholders = sourceIds.map(() => '?').join(',');
-  const stmt = getDb().prepare<string[], ChunkRow>(
-    `SELECT id, source_id, chunk_index, content, page_number, token_count, structural_label, created_at
-     FROM document_chunks
-     WHERE source_id IN (${placeholders})
-       AND structural_label = ?
-     ORDER BY source_id, chunk_index ASC`,
-  );
-  return stmt.all(...sourceIds, structuralLabel).map(mapRow);
-}
-
-/**
- * Item retornado pela busca FTS — chunk + posição no ranking BM25.
- * `rank` 0 = primeiro lugar; números menores são melhores (BM25 inverte
- * o sinal pra ORDER BY ASC ficar natural).
- */
-export interface FtsResult {
-  chunk: DocumentChunk;
-  /** Posição 0-based no ranking BM25. */
-  rank: number;
-}
-
-/**
- * Full-text search nos chunks dentro de um escopo (lista de sources).
- *
- * Usa SQLite FTS5 com tokenizer unicode61 sem diacríticos — "produção"
- * acha "produção" e "producao". Tolerante a ordem de palavras e plurais
- * básicos (com tokenizer porter seria melhor, mas perde acentos).
- *
- * 💡 Sintaxe FTS5: a query usa MATCH operator. Caracteres especiais
- * (parênteses, aspas, *, -) são interpretados — escapamos via `"...".`
- * cada palavra. OR explícito permite match parcial (qualquer palavra
- * basta), em vez do AND default que exigiria TODAS.
- */
 export function searchChunksByFts(
   sourceIds: string[],
   query: string,
@@ -194,8 +192,11 @@ export function searchChunksByFts(
     JOIN entre document_chunks e document_chunks_fts via rowid.
     bm25() retorna o score; ORDER BY rank ASC traz melhores primeiro.
     LIMIT cuida de pegar só top K.
+
+    💡 Por que SQL raw aqui (e não Drizzle): FTS5 usa sintaxe específica
+    (`MATCH`, função `bm25()`, virtual table) que Drizzle não suporta
+    declarativamente. Mantemos better-sqlite3 puro pra essa única query.
   */
-  // Params heterogêneos (string + numbers) → unknown[] no tipo do prepare.
   const stmt = getDb().prepare<unknown[], ChunkRow & { fts_rank: number }>(
     `SELECT c.id, c.source_id, c.chunk_index, c.content, c.page_number,
             c.token_count, c.structural_label, c.created_at,
@@ -211,13 +212,14 @@ export function searchChunksByFts(
   try {
     const rows = stmt.all(ftsQuery, ...sourceIds, k);
     return rows.map((row, idx) => ({
-      chunk: mapRow(row),
+      chunk: mapFtsRow(row),
       rank: idx,
     }));
   } catch (err) {
-    // Sintaxe FTS pode falhar com queries esquisitas; cai no graceful
-    // degradation (caller usa só busca semântica).
-    console.warn('[fts] query failed, returning empty:', err instanceof Error ? err.message : err);
+    console.warn(
+      '[fts] query failed, returning empty:',
+      err instanceof Error ? err.message : err,
+    );
     return [];
   }
 }
@@ -229,21 +231,21 @@ export function searchChunksByFts(
  */
 function buildFtsQuery(userQuery: string): string {
   const words = userQuery
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ') // só letras + números (Unicode-aware)
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter((w) => w.length >= 3);
-
   if (words.length === 0) return '';
-
-  // Aspas internas escapadas via `""` (FTS5 syntax)
   return words.map((w) => `"${w.replace(/"/g, '""')}"`).join(' OR ');
 }
 
 export function countChunksBySource(sourceId: string): number {
-  const stmt = getDb().prepare<[string], { count: number }>(
-    `SELECT COUNT(*) as count FROM document_chunks WHERE source_id = ?`,
-  );
-  return stmt.get(sourceId)?.count ?? 0;
+  const db = getDrizzleDb();
+  const row = db
+    .select({ count: sql<number>`count(*)` })
+    .from(documentChunks)
+    .where(eq(documentChunks.sourceId, sourceId))
+    .get();
+  return row?.count ?? 0;
 }
 
 /**
@@ -252,13 +254,12 @@ export function countChunksBySource(sourceId: string): number {
  * re-processar uma source (limpa antes de gerar novos chunks).
  */
 export function deleteChunksBySource(sourceId: string): void {
-  getDb().prepare(`DELETE FROM document_chunks WHERE source_id = ?`).run(sourceId);
+  const db = getDrizzleDb();
+  db.delete(documentChunks).where(eq(documentChunks.sourceId, sourceId)).run();
 }
 
 /**
  * Mapa retornado por `copyChunksToSource`: antigo chunk id → novo chunk id.
- * O caller usa esse mapa pra sincronizar os vetores no LanceDB com os mesmos
- * IDs novos (chave de junção entre os dois bancos).
  */
 export type IdMap = Record<string, string>;
 
@@ -267,45 +268,36 @@ export type IdMap = Record<string, string>;
  *
  * Usado pelo dedup do pipeline: quando a source nova (B) tem o mesmo
  * `content_hash` de uma source já processada (A), copiamos os chunks de A pra
- * B em vez de re-extrair/re-chunkar/re-embedar. Cada chunk copiado precisa de
- * novo id (PK), e o conteúdo (`content`, `chunk_index`, `page_number`,
- * `token_count`) vem do original.
- *
- * Retorna `IdMap` mapeando ids antigos → novos. O caller usa esse mapa pra
- * copiar os vetores correspondentes no LanceDB com os mesmos ids novos.
+ * B em vez de re-extrair/re-chunkar/re-embedar.
  */
 export function copyChunksToSource(fromSourceId: string, toSourceId: string): IdMap {
-  const db = getDb();
+  const db = getDrizzleDb();
   const oldChunks = listChunksBySource(fromSourceId);
-
-  const insertStmt = db.prepare(
-    `INSERT INTO document_chunks
-       (id, source_id, chunk_index, content, page_number, token_count, structural_label)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  );
-
   const idMap: IdMap = {};
-  const copyAll = db.transaction(() => {
+
+  db.transaction((tx) => {
     for (const old of oldChunks) {
       const newId = randomUUID();
       idMap[old.id] = newId;
-      insertStmt.run(
-        newId,
-        toSourceId,
-        old.chunkIndex,
-        old.content,
-        old.pageNumber,
-        old.tokenCount,
-        old.structuralLabel,
-      );
+      tx.insert(documentChunks)
+        .values({
+          id: newId,
+          sourceId: toSourceId,
+          chunkIndex: old.chunkIndex,
+          content: old.content,
+          pageNumber: old.pageNumber,
+          tokenCount: old.tokenCount,
+          structuralLabel: old.structuralLabel,
+        })
+        .run();
     }
   });
-  copyAll();
 
   return idMap;
 }
 
 // ── Operações no LanceDB (vetores) ────────────────────────────────────────
+// LanceDB fica fora de Drizzle (storage diferente, sem schema declarativo).
 
 export interface ChunkVectorRecord {
   id: string;
@@ -326,22 +318,11 @@ async function getChunksTable() {
 export async function insertChunkVectors(records: ChunkVectorRecord[]): Promise<void> {
   if (records.length === 0) return;
   const table = await getChunksTable();
-  /*
-    💡 Cast no boundary: LanceDB tipa o input como `Record<string, unknown>[]`
-    (aceita qualquer schema). Nosso `ChunkVectorRecord` é mais estrito — todas
-    as chaves são conhecidas. Cast aqui é seguro porque a interface tem só
-    chaves string e LanceDB não introspecciona a "extensão" do tipo.
-  */
   await table.add(records as unknown as Array<Record<string, unknown>>);
 }
 
 /**
- * Apaga todos os vetores de uma source. Usado quando a source é removida —
- * o cascade do SQLite limpa `document_chunks`, mas o LanceDB precisa ser
- * sincronizado explicitamente porque vive em outro storage.
- *
- * 💡 LanceDB usa SQL-like predicate strings; aspas simples escapam o id.
- *    UUID v4 não tem aspas internas, então concatenação é segura.
+ * Apaga todos os vetores de uma source.
  */
 export async function deleteChunkVectorsBySource(sourceId: string): Promise<void> {
   const table = await getChunksTable();
@@ -349,15 +330,7 @@ export async function deleteChunkVectorsBySource(sourceId: string): Promise<void
 }
 
 /**
- * Lê todos os vetores de uma source. Usado pelo dedup pra reaproveitar
- * embeddings já calculados em outra source com o mesmo conteúdo.
- *
- * 💡 Estratégia: scan completo + filtro em JS. A API `query().where()` do
- * lancedb-node se mostrou flaky em algumas versões (trava em vez de retornar);
- * scan + filter é robusto e a tabela é pequena (centenas-milhares de vetores).
- *
- * Retorna no formato `ChunkVectorRecord`. Float32Array vindo do Arrow é
- * convertido pra number[] pra bater com o tipo de insert.
+ * Lê todos os vetores de uma source.
  */
 export async function listChunkVectorsBySource(
   sourceId: string,
@@ -366,10 +339,8 @@ export async function listChunkVectorsBySource(
 }
 
 /**
- * Versão multi-source: lê vetores de N sources de uma vez. Usada pelo RAG
- * quando o escopo abrange múltiplos PDFs (tópico/matéria inteira).
- *
- * Mesmo padrão de scan + filter em JS pra robustez (ver ADR-019).
+ * Versão multi-source: lê vetores de N sources de uma vez (RAG escopo
+ * tópico/matéria).
  */
 export async function listChunkVectorsBySources(
   sourceIds: string[],

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { getDb } from '../connection';
+import { and, eq, isNotNull, ne, sql, count } from 'drizzle-orm';
+import { getDrizzleDb } from '../connection';
+import { sources, documentChunks } from '../drizzle/schema';
 
 /*
   Sources são arquivos/textos ligados a um tópico (FK ON DELETE CASCADE).
@@ -8,7 +10,10 @@ import { getDb } from '../connection';
   - `rawText` e `extractedConcepts` ficam null no momento do upload —
     são preenchidos pelo pipeline de ingestão (Fase E/F).
   - `contentHash` é SHA-256 do conteúdo, usado para dedup tanto em disco
-    quanto a nível de tópico (mesmo arquivo no mesmo tópico = mesma linha).
+    quanto a nível de tópico.
+
+  v0.7.3: migrado pra Drizzle. JOIN + COUNT vira `leftJoin` + `count()`
+  agregado; `groupBy(sources.id)` mantém a contagem por fonte.
 */
 
 export type SourceFileType = 'pdf' | 'txt' | 'url' | 'paste';
@@ -19,7 +24,7 @@ export interface Source {
   filename: string;
   fileType: SourceFileType;
   contentHash: string;
-  /** Caminho absoluto do arquivo em disco (userData/sources/<hash>.<ext>). */
+  /** Caminho absoluto do arquivo em disco. */
   filePath: string;
   rawText: string | null;
   extractedConcepts: string | null;
@@ -36,65 +41,71 @@ export interface CreateSourceInput {
   filePath: string;
 }
 
-interface SourceRow {
-  id: string;
-  topic_id: string;
-  filename: string;
-  file_type: string;
-  content_hash: string;
-  file_path: string;
-  raw_text: string | null;
-  extracted_concepts: string | null;
-  chunk_count: number;
-  created_at: string;
-}
+/*
+  💡 Sources tem várias colunas opcionais no schema.sql (filename, file_type,
+  content_hash, file_path) sem NOT NULL. Mas o app SEMPRE preenche essas
+  colunas em createSource. Aceito retornar `string` (não `string | null`)
+  na interface pública e usar `??` no normalize pra cobrir DBs com dados
+  malformados (legacy).
+*/
+type SourceRow = typeof sources.$inferSelect & { chunkCount: number };
 
-function mapRow(row: SourceRow): Source {
+function normalize(row: SourceRow): Source {
   return {
     id: row.id,
-    topicId: row.topic_id,
-    filename: row.filename,
-    fileType: row.file_type as SourceFileType,
-    contentHash: row.content_hash,
-    filePath: row.file_path,
-    rawText: row.raw_text,
-    extractedConcepts: row.extracted_concepts,
-    chunkCount: row.chunk_count,
-    createdAt: row.created_at,
+    topicId: row.topicId,
+    filename: row.filename ?? '',
+    fileType: (row.fileType ?? 'pdf') as SourceFileType,
+    contentHash: row.contentHash ?? '',
+    filePath: row.filePath ?? '',
+    rawText: row.rawText,
+    extractedConcepts: row.extractedConcepts,
+    chunkCount: row.chunkCount,
+    createdAt: row.createdAt,
   };
 }
 
 /*
-  💡 Todas as SELECTs usam LEFT JOIN com agregação COUNT pra trazer o número
-  de chunks indexados sem round-trip extra. Em queries que não retornam linha
-  agregada (single source), o GROUP BY é por id pra manter a contagem por fonte.
+  Helper: query base com LEFT JOIN em document_chunks + COUNT agregado.
+  Drizzle: `count(documentChunks.id)` produz `COUNT(c.id)` no SQL.
+  GROUP BY (sources.id) é obrigatório quando há agregação.
+
+  💡 Drizzle infere o tipo do select shape automaticamente: campos do schema
+  + count agregado. O `chunkCount` é `number` (count nunca é null em SQL).
 */
-const SOURCE_WITH_COUNT_SELECT = `
-  SELECT s.id, s.topic_id, s.filename, s.file_type, s.content_hash, s.file_path,
-         s.raw_text, s.extracted_concepts, s.created_at,
-         COUNT(c.id) as chunk_count
-  FROM sources s
-  LEFT JOIN document_chunks c ON c.source_id = s.id
-`;
+function selectSourceWithCount() {
+  return getDrizzleDb()
+    .select({
+      id: sources.id,
+      topicId: sources.topicId,
+      filename: sources.filename,
+      fileType: sources.fileType,
+      contentHash: sources.contentHash,
+      filePath: sources.filePath,
+      rawText: sources.rawText,
+      extractedConcepts: sources.extractedConcepts,
+      createdAt: sources.createdAt,
+      chunkCount: count(documentChunks.id),
+    })
+    .from(sources)
+    .leftJoin(documentChunks, eq(documentChunks.sourceId, sources.id));
+}
 
 export function listSourcesByTopic(topicId: string): Source[] {
-  const stmt = getDb().prepare<[string], SourceRow>(
-    `${SOURCE_WITH_COUNT_SELECT}
-     WHERE s.topic_id = ?
-     GROUP BY s.id
-     ORDER BY s.created_at DESC`,
-  );
-  return stmt.all(topicId).map(mapRow);
+  const rows = selectSourceWithCount()
+    .where(eq(sources.topicId, topicId))
+    .groupBy(sources.id)
+    .orderBy(sql`${sources.createdAt} DESC`)
+    .all();
+  return rows.map(normalize);
 }
 
 export function getSource(id: string): Source | null {
-  const stmt = getDb().prepare<[string], SourceRow>(
-    `${SOURCE_WITH_COUNT_SELECT}
-     WHERE s.id = ?
-     GROUP BY s.id`,
-  );
-  const row = stmt.get(id);
-  return row ? mapRow(row) : null;
+  const row = selectSourceWithCount()
+    .where(eq(sources.id, id))
+    .groupBy(sources.id)
+    .get();
+  return row ? normalize(row) : null;
 }
 
 /**
@@ -102,14 +113,17 @@ export function getSource(id: string): Source | null {
  * de upload pular criação quando o mesmo arquivo já está no tópico.
  */
 export function findSourceByHash(topicId: string, contentHash: string): Source | null {
-  const stmt = getDb().prepare<[string, string], SourceRow>(
-    `${SOURCE_WITH_COUNT_SELECT}
-     WHERE s.topic_id = ? AND s.content_hash = ?
-     GROUP BY s.id
-     LIMIT 1`,
-  );
-  const row = stmt.get(topicId, contentHash);
-  return row ? mapRow(row) : null;
+  const row = selectSourceWithCount()
+    .where(
+      and(
+        eq(sources.topicId, topicId),
+        eq(sources.contentHash, contentHash),
+      ),
+    )
+    .groupBy(sources.id)
+    .limit(1)
+    .get();
+  return row ? normalize(row) : null;
 }
 
 /**
@@ -117,35 +131,40 @@ export function findSourceByHash(topicId: string, contentHash: string): Source |
  * mesmo `contentHash`, em qualquer tópico. Usado pelo pipeline de ingestão
  * pra detectar oportunidade de dedup: em vez de extrair/chunkar/embedar de
  * novo, copia os chunks da source existente.
- *
- * O `exceptSourceId` é a própria source que está sendo processada — não
- * queremos retornar ela mesma (ela ainda não tem chunks na primeira ingestão).
  */
 export function findProcessedSourceByHash(
   contentHash: string,
   exceptSourceId: string,
 ): Source | null {
-  const stmt = getDb().prepare<[string, string], SourceRow>(
-    `${SOURCE_WITH_COUNT_SELECT}
-     WHERE s.content_hash = ?
-       AND s.id != ?
-       AND s.raw_text IS NOT NULL
-     GROUP BY s.id
-     HAVING chunk_count > 0
-     ORDER BY s.created_at ASC
-     LIMIT 1`,
-  );
-  const row = stmt.get(contentHash, exceptSourceId);
-  return row ? mapRow(row) : null;
+  const row = selectSourceWithCount()
+    .where(
+      and(
+        eq(sources.contentHash, contentHash),
+        ne(sources.id, exceptSourceId),
+        isNotNull(sources.rawText),
+      ),
+    )
+    .groupBy(sources.id)
+    .having(sql`count(${documentChunks.id}) > 0`)
+    .orderBy(sql`${sources.createdAt} ASC`)
+    .limit(1)
+    .get();
+  return row ? normalize(row) : null;
 }
 
 export function createSource(input: CreateSourceInput): Source {
   const id = randomUUID();
-  const stmt = getDb().prepare(
-    `INSERT INTO sources (id, topic_id, filename, file_type, content_hash, file_path)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  );
-  stmt.run(id, input.topicId, input.filename, input.fileType, input.contentHash, input.filePath);
+  const db = getDrizzleDb();
+  db.insert(sources)
+    .values({
+      id,
+      topicId: input.topicId,
+      filename: input.filename,
+      fileType: input.fileType,
+      contentHash: input.contentHash,
+      filePath: input.filePath,
+    })
+    .run();
 
   const created = getSource(id);
   if (!created) throw new Error('Falha ao recuperar source recém-criada');
@@ -160,26 +179,20 @@ export function updateSourceProcessing(
   id: string,
   patch: { rawText?: string; extractedConcepts?: string },
 ): Source {
-  const fields: string[] = [];
-  const values: string[] = [];
-
-  if (patch.rawText !== undefined) {
-    fields.push('raw_text = ?');
-    values.push(patch.rawText);
-  }
+  const updates: Partial<typeof sources.$inferInsert> = {};
+  if (patch.rawText !== undefined) updates.rawText = patch.rawText;
   if (patch.extractedConcepts !== undefined) {
-    fields.push('extracted_concepts = ?');
-    values.push(patch.extractedConcepts);
+    updates.extractedConcepts = patch.extractedConcepts;
   }
 
-  if (fields.length === 0) {
+  if (Object.keys(updates).length === 0) {
     const existing = getSource(id);
     if (!existing) throw new Error(`Source ${id} não encontrada`);
     return existing;
   }
 
-  values.push(id);
-  getDb().prepare(`UPDATE sources SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  const db = getDrizzleDb();
+  db.update(sources).set(updates).where(eq(sources.id, id)).run();
 
   const updated = getSource(id);
   if (!updated) throw new Error(`Source ${id} sumiu durante update`);
@@ -187,8 +200,8 @@ export function updateSourceProcessing(
 }
 
 export function deleteSource(id: string): void {
-  const stmt = getDb().prepare(`DELETE FROM sources WHERE id = ?`);
-  const result = stmt.run(id);
+  const db = getDrizzleDb();
+  const result = db.delete(sources).where(eq(sources.id, id)).run();
   if (result.changes === 0) {
     throw new Error(`Source ${id} não encontrada`);
   }
@@ -200,9 +213,11 @@ export function deleteSource(id: string): void {
  * referência (várias topics podem compartilhar o mesmo arquivo via dedup).
  */
 export function countSourcesByFilePath(filePath: string): number {
-  const stmt = getDb().prepare<[string], { count: number }>(
-    `SELECT COUNT(*) as count FROM sources WHERE file_path = ?`,
-  );
-  const result = stmt.get(filePath);
-  return result?.count ?? 0;
+  const db = getDrizzleDb();
+  const row = db
+    .select({ count: count() })
+    .from(sources)
+    .where(eq(sources.filePath, filePath))
+    .get();
+  return row?.count ?? 0;
 }

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { getDb } from '../connection';
+import { and, asc, desc, eq, sql, count } from 'drizzle-orm';
+import { getDrizzleDb } from '../connection';
+import { conversations, messages } from '../drizzle/schema';
 
 /*
   Persistência de conversas + mensagens (chat).
@@ -10,17 +12,8 @@ import { getDb } from '../connection';
   - quiz_question (v0.7.0): chat inline numa pergunta de quiz; scope_id é
     quiz_question_id; SEM RAG (contexto = pergunta + alternativas + explicação)
 
-  As mensagens compartilham o mesmo contexto.
-
-  Schema (`conversations` desde v0.1.0):
-  - `conversations`: id, title, scope_type, scope_id, created_at, updated_at
-  - `messages`: id, conversation_id, role, content, context_chunks (JSON), created_at
-    com ON DELETE CASCADE → apagar conversa apaga mensagens.
-
-  💡 Decisão de design: campo `context_chunks` é JSON com a lista de chunk_ids
-  usados pra responder. Permite UI mostrar "fontes" e debug. Em v1.0 isso pode
-  virar tabela de junção se virar relevante consultar "quais respostas usaram
-  esse chunk". Pra `quiz_question`, este campo fica null (sem RAG).
+  v0.7.3: migrado pra Drizzle. JSON do `context_chunks` continua como string
+  no DB; parse/stringify em JS (Drizzle não tipa JSON nativamente em SQLite).
 */
 
 export type ScopeType =
@@ -77,29 +70,11 @@ export interface AddMessageInput {
   contextChunkIds?: string[];
 }
 
-interface ConversationRow {
-  id: string;
-  title: string | null;
-  scope_type: string;
-  scope_id: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface MessageRow {
-  id: string;
-  conversation_id: string;
-  role: string;
-  content: string;
-  context_chunks: string | null;
-  created_at: string;
-}
-
-function mapMessage(row: MessageRow): Message {
+function normalizeMessage(row: typeof messages.$inferSelect): Message {
   let contextChunkIds: string[] | null = null;
-  if (row.context_chunks) {
+  if (row.contextChunks) {
     try {
-      const parsed = JSON.parse(row.context_chunks) as unknown;
+      const parsed = JSON.parse(row.contextChunks) as unknown;
       if (Array.isArray(parsed) && parsed.every((p) => typeof p === 'string')) {
         contextChunkIds = parsed as string[];
       }
@@ -109,126 +84,132 @@ function mapMessage(row: MessageRow): Message {
   }
   return {
     id: row.id,
-    conversationId: row.conversation_id,
+    conversationId: row.conversationId,
     role: row.role as MessageRole,
     content: row.content,
     contextChunkIds,
-    createdAt: row.created_at,
+    createdAt: row.createdAt,
   };
 }
 
-function mapConversation(row: ConversationRow, messages: Message[]): Conversation {
+function normalizeConversation(
+  row: typeof conversations.$inferSelect,
+  msgs: Message[],
+): Conversation {
   return {
     id: row.id,
     title: row.title,
-    scopeType: row.scope_type as ScopeType,
-    scopeId: row.scope_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    messages,
+    scopeType: row.scopeType as ScopeType,
+    scopeId: row.scopeId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    messages: msgs,
   };
 }
 
 export function createConversation(input: CreateConversationInput): Conversation {
   const id = randomUUID();
-  const stmt = getDb().prepare(
-    `INSERT INTO conversations (id, title, scope_type, scope_id)
-     VALUES (?, ?, ?, ?)`,
-  );
-  stmt.run(id, input.title ?? null, input.scopeType, input.scopeId);
+  const db = getDrizzleDb();
+  db.insert(conversations)
+    .values({
+      id,
+      title: input.title ?? null,
+      scopeType: input.scopeType,
+      scopeId: input.scopeId,
+    })
+    .run();
 
-  const conversation = getConversation(id);
-  if (!conversation) throw new Error('Falha ao recuperar conversa recém-criada');
-  return conversation;
+  const conv = getConversation(id);
+  if (!conv) throw new Error('Falha ao recuperar conversa recém-criada');
+  return conv;
 }
 
 export function getConversation(id: string): Conversation | null {
-  const db = getDb();
-  const row = db
-    .prepare<[string], ConversationRow>(
-      `SELECT id, title, scope_type, scope_id, created_at, updated_at
-       FROM conversations WHERE id = ?`,
-    )
-    .get(id);
+  const db = getDrizzleDb();
+  const row = db.select().from(conversations).where(eq(conversations.id, id)).get();
   if (!row) return null;
 
-  const messages = db
-    .prepare<[string], MessageRow>(
-      `SELECT id, conversation_id, role, content, context_chunks, created_at
-       FROM messages
-       WHERE conversation_id = ?
-       ORDER BY created_at ASC, rowid ASC`,
-    )
-    .all(id)
-    .map(mapMessage);
+  const msgs = db
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, id))
+    .orderBy(asc(messages.createdAt), asc(sql`rowid`))
+    .all()
+    .map(normalizeMessage);
 
-  return mapConversation(row, messages);
+  return normalizeConversation(row, msgs);
 }
 
 /**
  * Acha a primeira conversa de um escopo. Usado quando um escopo tem
- * relação 1:1 com a conversa (ex: `quiz_question` — cada pergunta tem
- * uma conversa de dúvidas, criada lazy).
+ * relação 1:1 com a conversa (ex: `quiz_question`).
  */
 export function findConversationByScope(
   scopeType: ScopeType,
   scopeId: string,
 ): Conversation | null {
-  const db = getDb();
+  const db = getDrizzleDb();
   const row = db
-    .prepare<[string, string], { id: string }>(
-      `SELECT id FROM conversations
-       WHERE scope_type = ? AND scope_id = ?
-       ORDER BY created_at ASC LIMIT 1`,
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.scopeType, scopeType),
+        eq(conversations.scopeId, scopeId),
+      ),
     )
-    .get(scopeType, scopeId);
+    .orderBy(asc(conversations.createdAt))
+    .limit(1)
+    .get();
   return row ? getConversation(row.id) : null;
 }
 
 /**
  * Lista conversas de um escopo específico, ordenadas por `updated_at` (mais
  * recente primeiro). Inclui summary das mensagens mas não as mensagens em si.
+ *
+ * 💡 N+1 query (1 por conversa pra count + last message). OK pra v0.4
+ * (poucas conversas). Quando virar dor, otimizar com window function.
  */
 export function listConversationsByScope(
   scopeType: ScopeType,
   scopeId: string,
 ): ConversationSummary[] {
-  const db = getDb();
+  const db = getDrizzleDb();
   const rows = db
-    .prepare<[string, string], ConversationRow>(
-      `SELECT id, title, scope_type, scope_id, created_at, updated_at
-       FROM conversations
-       WHERE scope_type = ? AND scope_id = ?
-       ORDER BY updated_at DESC`,
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.scopeType, scopeType),
+        eq(conversations.scopeId, scopeId),
+      ),
     )
-    .all(scopeType, scopeId);
+    .orderBy(desc(conversations.updatedAt))
+    .all();
 
-  // Pra cada conversa, conta mensagens e busca preview da última.
-  // 1 query por conversa não é ideal mas pra v0.4 (poucas conversas) é OK.
-  // Quando virar dor, trocar por 1 query com JOIN + window function.
   return rows.map((r) => {
     const lastMessage = db
-      .prepare<[string], { content: string }>(
-        `SELECT content FROM messages
-         WHERE conversation_id = ?
-         ORDER BY created_at DESC, rowid DESC
-         LIMIT 1`,
-      )
-      .get(r.id);
-    const count = db
-      .prepare<[string], { count: number }>(
-        `SELECT COUNT(*) as count FROM messages WHERE conversation_id = ?`,
-      )
-      .get(r.id);
+      .select({ content: messages.content })
+      .from(messages)
+      .where(eq(messages.conversationId, r.id))
+      .orderBy(desc(messages.createdAt), desc(sql`rowid`))
+      .limit(1)
+      .get();
+    const cnt = db
+      .select({ count: count() })
+      .from(messages)
+      .where(eq(messages.conversationId, r.id))
+      .get();
 
     return {
       id: r.id,
       title: r.title,
-      scopeType: r.scope_type as ScopeType,
-      scopeId: r.scope_id,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-      messageCount: count?.count ?? 0,
+      scopeType: r.scopeType as ScopeType,
+      scopeId: r.scopeId,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      messageCount: cnt?.count ?? 0,
       preview: lastMessage?.content
         ? lastMessage.content.slice(0, 80) +
           (lastMessage.content.length > 80 ? '…' : '')
@@ -243,73 +224,72 @@ export function listConversationsByScope(
  */
 export function addMessage(input: AddMessageInput): Message {
   const id = randomUUID();
-  const db = getDb();
+  const db = getDrizzleDb();
 
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO messages (id, conversation_id, role, content, context_chunks)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      input.conversationId,
-      input.role,
-      input.content,
-      input.contextChunkIds && input.contextChunkIds.length > 0
-        ? JSON.stringify(input.contextChunkIds)
-        : null,
-    );
-    db.prepare(
-      `UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    ).run(input.conversationId);
+  /*
+    Drizzle: `db.transaction(tx => ...)` retorna o que o callback retornar.
+    Mesma semântica de `better-sqlite3.transaction(fn)()` — atômica + rollback.
+  */
+  db.transaction((tx) => {
+    tx.insert(messages)
+      .values({
+        id,
+        conversationId: input.conversationId,
+        role: input.role,
+        content: input.content,
+        contextChunks:
+          input.contextChunkIds && input.contextChunkIds.length > 0
+            ? JSON.stringify(input.contextChunkIds)
+            : null,
+      })
+      .run();
+    tx.update(conversations)
+      .set({ updatedAt: sql`CURRENT_TIMESTAMP` as unknown as string })
+      .where(eq(conversations.id, input.conversationId))
+      .run();
   });
-  tx();
 
-  const message = db
-    .prepare<[string], MessageRow>(
-      `SELECT id, conversation_id, role, content, context_chunks, created_at
-       FROM messages WHERE id = ?`,
-    )
-    .get(id);
-  if (!message) throw new Error('Falha ao recuperar mensagem recém-criada');
-  return mapMessage(message);
+  const row = db.select().from(messages).where(eq(messages.id, id)).get();
+  if (!row) throw new Error('Falha ao recuperar mensagem recém-criada');
+  return normalizeMessage(row);
 }
 
 /**
  * Pega as últimas N mensagens em ordem cronológica (mais antiga → mais nova).
- * Usado pelo chat service pra montar o sliding window do contexto.
  */
 export function getRecentMessages(conversationId: string, limit: number): Message[] {
-  const db = getDb();
+  const db = getDrizzleDb();
   const recent = db
-    .prepare<[string, number], MessageRow>(
-      `SELECT id, conversation_id, role, content, context_chunks, created_at
-       FROM messages
-       WHERE conversation_id = ?
-       ORDER BY created_at DESC, rowid DESC
-       LIMIT ?`,
-    )
-    .all(conversationId, limit)
-    .map(mapMessage);
+    .select()
+    .from(messages)
+    .where(eq(messages.conversationId, conversationId))
+    .orderBy(desc(messages.createdAt), desc(sql`rowid`))
+    .limit(limit)
+    .all()
+    .map(normalizeMessage);
 
-  // Reverte: o resultado vem do mais recente pro mais antigo, mas o LLM
-  // espera ordem cronológica (mais antigo primeiro).
+  // Reverte: resultado vem do mais recente pro mais antigo; LLM espera
+  // ordem cronológica (mais antigo primeiro).
   return recent.reverse();
 }
 
 export function renameConversation(id: string, title: string): Conversation {
   const trimmed = title.trim();
   if (trimmed.length === 0) throw new Error('Título não pode ficar vazio');
-  const result = getDb()
-    .prepare(`UPDATE conversations SET title = ? WHERE id = ?`)
-    .run(trimmed, id);
+  const db = getDrizzleDb();
+  const result = db
+    .update(conversations)
+    .set({ title: trimmed })
+    .where(eq(conversations.id, id))
+    .run();
   if (result.changes === 0) throw new Error(`Conversa ${id} não encontrada`);
-  const conversation = getConversation(id);
-  if (!conversation) throw new Error('Falha ao recuperar conversa após rename');
-  return conversation;
+  const conv = getConversation(id);
+  if (!conv) throw new Error('Falha ao recuperar conversa após rename');
+  return conv;
 }
 
 export function deleteConversation(id: string): void {
-  // CASCADE em messages → apaga mensagens junto.
-  const result = getDb().prepare(`DELETE FROM conversations WHERE id = ?`).run(id);
+  const db = getDrizzleDb();
+  const result = db.delete(conversations).where(eq(conversations.id, id)).run();
   if (result.changes === 0) throw new Error(`Conversa ${id} não encontrada`);
 }

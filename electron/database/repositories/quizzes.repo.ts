@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { getDb } from '../connection';
+import { and, asc, desc, eq, sql, count } from 'drizzle-orm';
+import { getDrizzleDb } from '../connection';
+import { quizzes, quizQuestions } from '../drizzle/schema';
 
 /*
   Persistência de quizzes + quiz_questions. Diferente de subjects/topics/sources,
@@ -7,8 +9,7 @@ import { getDb } from '../connection';
   arquivo só porque sempre operam juntas — criar quiz "vazio" sem perguntas
   não faz sentido.
 
-  Padrão de IDs: cada quiz e cada pergunta ganha UUID separado. Quiz "armazena"
-  o resultado completo (score, tempo, gabarito vs respostas).
+  v0.7.3: migrado pra Drizzle. Transações via `db.transaction(tx => ...)`.
 */
 
 export type QuestionType = 'multiple_choice' | 'true_false';
@@ -29,7 +30,7 @@ export interface QuizQuestion {
   /** True/false após responder; null se ainda não respondeu. */
   isCorrect: boolean | null;
   explanation: string;
-  /** Pergunta do usuário (chat inline futuro). Null por enquanto. */
+  /** Schema legacy v0.1 — não populado desde v0.7. */
   doubtQuestion: string | null;
   doubtResponse: string | null;
   answeredAt: string | null;
@@ -46,17 +47,11 @@ export interface Quiz {
   timeSpentSeconds: number | null;
   completedAt: string | null;
   createdAt: string;
-  /** Perguntas — sempre carregadas junto com o quiz. */
   questions: QuizQuestion[];
 }
 
-/**
- * Input pra criar quiz: vem do quiz-generator com perguntas já validadas.
- * O `selectedIndex`, `isCorrect`, `score` etc começam null/undefined.
- */
 export interface CreateQuizInput {
   topicId: string;
-  /** Pode ser null se quiz veio de múltiplas sources. */
   sourceId: string | null;
   title?: string | null;
   quizMode: QuizMode;
@@ -70,66 +65,40 @@ export interface CreateQuizInput {
   }>;
 }
 
-interface QuizRow {
-  id: string;
-  topic_id: string;
-  source_id: string | null;
-  title: string | null;
-  quiz_mode: string;
-  total_questions: number;
-  score: number | null;
-  time_spent_seconds: number | null;
-  completed_at: string | null;
-  created_at: string;
-}
-
-interface QuizQuestionRow {
-  id: string;
-  quiz_id: string;
-  type: string;
-  difficulty: string;
-  question: string;
-  options: string;
-  correct_index: number;
-  selected_index: number | null;
-  is_correct: number | null; // SQLite stores boolean as 0/1
-  explanation: string | null;
-  doubt_question: string | null;
-  doubt_response: string | null;
-  answered_at: string | null;
-}
-
-function mapQuiz(row: QuizRow, questions: QuizQuestion[]): Quiz {
+function normalizeQuestion(row: typeof quizQuestions.$inferSelect): QuizQuestion {
   return {
     id: row.id,
-    topicId: row.topic_id,
-    sourceId: row.source_id,
-    title: row.title,
-    quizMode: row.quiz_mode as QuizMode,
-    totalQuestions: row.total_questions,
-    score: row.score,
-    timeSpentSeconds: row.time_spent_seconds,
-    completedAt: row.completed_at,
-    createdAt: row.created_at,
-    questions,
+    quizId: row.quizId,
+    type: row.type as QuestionType,
+    difficulty: (row.difficulty ?? 'medium') as QuestionDifficulty,
+    question: row.question,
+    options: JSON.parse(row.options) as string[],
+    correctIndex: row.correctIndex,
+    selectedIndex: row.selectedIndex,
+    isCorrect: row.isCorrect === null ? null : row.isCorrect === 1,
+    explanation: row.explanation ?? '',
+    doubtQuestion: row.doubtQuestion,
+    doubtResponse: row.doubtResponse,
+    answeredAt: row.answeredAt,
   };
 }
 
-function mapQuestion(row: QuizQuestionRow): QuizQuestion {
+function normalizeQuiz(
+  row: typeof quizzes.$inferSelect,
+  questions: QuizQuestion[],
+): Quiz {
   return {
     id: row.id,
-    quizId: row.quiz_id,
-    type: row.type as QuestionType,
-    difficulty: row.difficulty as QuestionDifficulty,
-    question: row.question,
-    options: JSON.parse(row.options) as string[],
-    correctIndex: row.correct_index,
-    selectedIndex: row.selected_index,
-    isCorrect: row.is_correct === null ? null : row.is_correct === 1,
-    explanation: row.explanation ?? '',
-    doubtQuestion: row.doubt_question,
-    doubtResponse: row.doubt_response,
-    answeredAt: row.answered_at,
+    topicId: row.topicId,
+    sourceId: row.sourceId,
+    title: row.title,
+    quizMode: (row.quizMode ?? 'quality') as QuizMode,
+    totalQuestions: row.totalQuestions ?? 0,
+    score: row.score,
+    timeSpentSeconds: row.timeSpentSeconds,
+    completedAt: row.completedAt,
+    createdAt: row.createdAt,
+    questions,
   };
 }
 
@@ -144,42 +113,36 @@ export function createQuiz(input: CreateQuizInput): Quiz {
     throw new Error('Quiz precisa de pelo menos 1 pergunta');
   }
 
-  const db = getDb();
+  const db = getDrizzleDb();
   const quizId = randomUUID();
 
-  const insertQuiz = db.prepare(
-    `INSERT INTO quizzes (id, topic_id, source_id, title, quiz_mode, total_questions)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  );
-  const insertQuestion = db.prepare(
-    `INSERT INTO quiz_questions
-       (id, quiz_id, type, difficulty, question, options, correct_index, explanation)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
+  db.transaction((tx) => {
+    tx.insert(quizzes)
+      .values({
+        id: quizId,
+        topicId: input.topicId,
+        sourceId: input.sourceId,
+        title: input.title ?? null,
+        quizMode: input.quizMode,
+        totalQuestions: input.questions.length,
+      })
+      .run();
 
-  const tx = db.transaction(() => {
-    insertQuiz.run(
-      quizId,
-      input.topicId,
-      input.sourceId,
-      input.title ?? null,
-      input.quizMode,
-      input.questions.length,
-    );
     for (const q of input.questions) {
-      insertQuestion.run(
-        randomUUID(),
-        quizId,
-        q.type,
-        q.difficulty,
-        q.question,
-        JSON.stringify(q.options),
-        q.correctIndex,
-        q.explanation,
-      );
+      tx.insert(quizQuestions)
+        .values({
+          id: randomUUID(),
+          quizId,
+          type: q.type,
+          difficulty: q.difficulty,
+          question: q.question,
+          options: JSON.stringify(q.options),
+          correctIndex: q.correctIndex,
+          explanation: q.explanation,
+        })
+        .run();
     }
   });
-  tx();
 
   const quiz = getQuiz(quizId);
   if (!quiz) throw new Error('Falha ao recuperar quiz recém-criado');
@@ -190,31 +153,20 @@ export function createQuiz(input: CreateQuizInput): Quiz {
  * Busca quiz pelo ID com todas as perguntas. Retorna null se não existir.
  */
 export function getQuiz(id: string): Quiz | null {
-  const db = getDb();
+  const db = getDrizzleDb();
 
-  const quizRow = db
-    .prepare<[string], QuizRow>(
-      `SELECT id, topic_id, source_id, title, quiz_mode, total_questions,
-              score, time_spent_seconds, completed_at, created_at
-       FROM quizzes WHERE id = ?`,
-    )
-    .get(id);
-
+  const quizRow = db.select().from(quizzes).where(eq(quizzes.id, id)).get();
   if (!quizRow) return null;
 
   const questions = db
-    .prepare<[string], QuizQuestionRow>(
-      `SELECT id, quiz_id, type, difficulty, question, options, correct_index,
-              selected_index, is_correct, explanation, doubt_question, doubt_response,
-              answered_at
-       FROM quiz_questions
-       WHERE quiz_id = ?
-       ORDER BY rowid ASC`,
-    )
-    .all(id)
-    .map(mapQuestion);
+    .select()
+    .from(quizQuestions)
+    .where(eq(quizQuestions.quizId, id))
+    .orderBy(asc(sql`rowid`))
+    .all()
+    .map(normalizeQuestion);
 
-  return mapQuiz(quizRow, questions);
+  return normalizeQuiz(quizRow, questions);
 }
 
 /**
@@ -223,21 +175,11 @@ export function getQuiz(id: string): Quiz | null {
  * em pergunta de quiz (v0.7.0).
  */
 export function getQuizQuestion(id: string): QuizQuestion | null {
-  const row = getDb()
-    .prepare<[string], QuizQuestionRow>(
-      `SELECT id, quiz_id, type, difficulty, question, options, correct_index,
-              selected_index, is_correct, explanation, doubt_question, doubt_response,
-              answered_at
-       FROM quiz_questions WHERE id = ?`,
-    )
-    .get(id);
-  return row ? mapQuestion(row) : null;
+  const db = getDrizzleDb();
+  const row = db.select().from(quizQuestions).where(eq(quizQuestions.id, id)).get();
+  return row ? normalizeQuestion(row) : null;
 }
 
-/**
- * Lista quizzes de um tópico (sem as perguntas, pra listagem rápida).
- * Se precisar das perguntas, chama getQuiz(id) na sequência.
- */
 export interface QuizSummary {
   id: string;
   topicId: string;
@@ -249,98 +191,98 @@ export interface QuizSummary {
   createdAt: string;
 }
 
+/**
+ * Lista quizzes de um tópico (sem as perguntas, pra listagem rápida).
+ */
 export function listQuizzesByTopic(topicId: string): QuizSummary[] {
-  const db = getDb();
+  const db = getDrizzleDb();
   const rows = db
-    .prepare<[string], QuizRow>(
-      `SELECT id, topic_id, source_id, title, quiz_mode, total_questions,
-              score, time_spent_seconds, completed_at, created_at
-       FROM quizzes
-       WHERE topic_id = ?
-       ORDER BY created_at DESC`,
-    )
-    .all(topicId);
+    .select()
+    .from(quizzes)
+    .where(eq(quizzes.topicId, topicId))
+    .orderBy(desc(quizzes.createdAt))
+    .all();
 
   return rows.map((r) => ({
     id: r.id,
-    topicId: r.topic_id,
-    sourceId: r.source_id,
+    topicId: r.topicId,
+    sourceId: r.sourceId,
     title: r.title,
-    totalQuestions: r.total_questions,
+    totalQuestions: r.totalQuestions ?? 0,
     score: r.score,
-    completedAt: r.completed_at,
-    createdAt: r.created_at,
+    completedAt: r.completedAt,
+    createdAt: r.createdAt,
   }));
 }
 
 /**
  * Registra resposta do usuário a uma pergunta. Marca isCorrect e answeredAt.
- * Não atualiza o score do quiz — chamar `finishQuiz` quando termina.
  */
 export function answerQuestion(
   questionId: string,
   selectedIndex: number,
 ): QuizQuestion {
-  const db = getDb();
+  const db = getDrizzleDb();
 
   const current = db
-    .prepare<[string], { correct_index: number }>(
-      `SELECT correct_index FROM quiz_questions WHERE id = ?`,
-    )
-    .get(questionId);
+    .select({ correctIndex: quizQuestions.correctIndex })
+    .from(quizQuestions)
+    .where(eq(quizQuestions.id, questionId))
+    .get();
 
   if (!current) throw new Error(`Pergunta ${questionId} não encontrada`);
 
-  const isCorrect = selectedIndex === current.correct_index ? 1 : 0;
+  const isCorrect = selectedIndex === current.correctIndex ? 1 : 0;
 
-  db.prepare(
-    `UPDATE quiz_questions
-     SET selected_index = ?, is_correct = ?, answered_at = CURRENT_TIMESTAMP
-     WHERE id = ?`,
-  ).run(selectedIndex, isCorrect, questionId);
+  db.update(quizQuestions)
+    .set({
+      selectedIndex,
+      isCorrect,
+      answeredAt: sql`CURRENT_TIMESTAMP` as unknown as string,
+    })
+    .where(eq(quizQuestions.id, questionId))
+    .run();
 
-  const updated = db
-    .prepare<[string], QuizQuestionRow>(
-      `SELECT id, quiz_id, type, difficulty, question, options, correct_index,
-              selected_index, is_correct, explanation, doubt_question, doubt_response,
-              answered_at
-       FROM quiz_questions WHERE id = ?`,
-    )
-    .get(questionId);
-
-  if (!updated) throw new Error('Falha ao recuperar pergunta atualizada');
-  return mapQuestion(updated);
+  const row = db.select().from(quizQuestions).where(eq(quizQuestions.id, questionId)).get();
+  if (!row) throw new Error('Falha ao recuperar pergunta atualizada');
+  return normalizeQuestion(row);
 }
 
 /**
  * Finaliza o quiz: calcula score, marca completedAt, salva tempo gasto.
- * Idempotente — pode ser chamada várias vezes.
  */
 export function finishQuiz(quizId: string, timeSpentSeconds: number): Quiz {
-  const db = getDb();
+  const db = getDrizzleDb();
 
   const correctCount = db
-    .prepare<[string], { count: number }>(
-      `SELECT COUNT(*) as count FROM quiz_questions
-       WHERE quiz_id = ? AND is_correct = 1`,
+    .select({ count: count() })
+    .from(quizQuestions)
+    .where(
+      and(
+        eq(quizQuestions.quizId, quizId),
+        eq(quizQuestions.isCorrect, 1),
+      ),
     )
-    .get(quizId);
+    .get();
 
   const total = db
-    .prepare<[string], { count: number }>(
-      `SELECT total_questions as count FROM quizzes WHERE id = ?`,
-    )
-    .get(quizId);
+    .select({ total: quizzes.totalQuestions })
+    .from(quizzes)
+    .where(eq(quizzes.id, quizId))
+    .get();
 
   if (!total) throw new Error(`Quiz ${quizId} não encontrado`);
 
   const score = correctCount?.count ?? 0;
 
-  db.prepare(
-    `UPDATE quizzes
-     SET score = ?, time_spent_seconds = ?, completed_at = CURRENT_TIMESTAMP
-     WHERE id = ?`,
-  ).run(score, timeSpentSeconds, quizId);
+  db.update(quizzes)
+    .set({
+      score,
+      timeSpentSeconds,
+      completedAt: sql`CURRENT_TIMESTAMP` as unknown as string,
+    })
+    .where(eq(quizzes.id, quizId))
+    .run();
 
   const quiz = getQuiz(quizId);
   if (!quiz) throw new Error('Falha ao recuperar quiz finalizado');
@@ -348,22 +290,22 @@ export function finishQuiz(quizId: string, timeSpentSeconds: number): Quiz {
 }
 
 export function deleteQuiz(id: string): void {
-  // CASCADE em quiz_questions já cuida das perguntas.
-  const result = getDb().prepare(`DELETE FROM quizzes WHERE id = ?`).run(id);
+  const db = getDrizzleDb();
+  const result = db.delete(quizzes).where(eq(quizzes.id, id)).run();
   if (result.changes === 0) throw new Error(`Quiz ${id} não encontrado`);
 }
 
-/**
- * Renomeia o título do quiz. Não toca em mais nada.
- */
 export function renameQuiz(id: string, title: string): Quiz {
   const trimmed = title.trim();
   if (trimmed.length === 0) {
     throw new Error('Título não pode ficar vazio');
   }
-  const result = getDb()
-    .prepare(`UPDATE quizzes SET title = ? WHERE id = ?`)
-    .run(trimmed, id);
+  const db = getDrizzleDb();
+  const result = db
+    .update(quizzes)
+    .set({ title: trimmed })
+    .where(eq(quizzes.id, id))
+    .run();
   if (result.changes === 0) throw new Error(`Quiz ${id} não encontrado`);
 
   const quiz = getQuiz(id);
@@ -377,27 +319,35 @@ export function renameQuiz(id: string, title: string): Quiz {
  * geradas — usuário responde as MESMAS de novo. Zero tokens, zero custo de API.
  */
 export function resetQuiz(quizId: string): Quiz {
-  const db = getDb();
+  const db = getDrizzleDb();
 
   const existing = db
-    .prepare<[string], { id: string }>(`SELECT id FROM quizzes WHERE id = ?`)
-    .get(quizId);
+    .select({ id: quizzes.id })
+    .from(quizzes)
+    .where(eq(quizzes.id, quizId))
+    .get();
   if (!existing) throw new Error(`Quiz ${quizId} não encontrado`);
 
-  const tx = db.transaction(() => {
-    db.prepare(
-      `UPDATE quiz_questions
-       SET selected_index = NULL, is_correct = NULL, answered_at = NULL,
-           doubt_question = NULL, doubt_response = NULL
-       WHERE quiz_id = ?`,
-    ).run(quizId);
-    db.prepare(
-      `UPDATE quizzes
-       SET score = NULL, time_spent_seconds = NULL, completed_at = NULL
-       WHERE id = ?`,
-    ).run(quizId);
+  db.transaction((tx) => {
+    tx.update(quizQuestions)
+      .set({
+        selectedIndex: null,
+        isCorrect: null,
+        answeredAt: null,
+        doubtQuestion: null,
+        doubtResponse: null,
+      })
+      .where(eq(quizQuestions.quizId, quizId))
+      .run();
+    tx.update(quizzes)
+      .set({
+        score: null,
+        timeSpentSeconds: null,
+        completedAt: null,
+      })
+      .where(eq(quizzes.id, quizId))
+      .run();
   });
-  tx();
 
   const reset = getQuiz(quizId);
   if (!reset) throw new Error('Falha ao recuperar quiz após reset');
