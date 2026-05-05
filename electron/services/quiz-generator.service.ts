@@ -7,6 +7,7 @@ import {
   type QuizQuestionTypePref,
 } from './prompts/quiz-generation';
 import { validateQuestions, type ValidationVerdict } from './prompts/quiz-validation';
+import { suggestThemesFromText } from './prompts/theme-suggester';
 
 /*
   Orquestrador do pipeline de 3 etapas:
@@ -194,30 +195,50 @@ export async function generateQuiz(
  * Sugere temas baseado no material das sources, sem gerar quiz.
  * Usado pelo botão "Sugerir temas" no QuizSetup.
  *
- * Reaproveita o cache `extracted_concepts` se existir.
+ * v0.7.4: refatorado pra ser RÁPIDO (~1-3s vs 30-90s antes):
+ * - Source com cache `extracted_concepts` → instantâneo (lê JSON local)
+ * - Source sem cache → roda prompt LEVE (`suggestThemesFromText`) que pede
+ *   só temas (~150 tokens out, 15k chars in) em vez da análise completa
+ *   (~3k tokens out, 50k chars in).
+ * - Sources rodam em PARALELO via `Promise.all`.
+ *
+ * O cache de análise completa só é populado quando o aluno clica em
+ * "Gerar quiz" (o pipeline real ainda roda `analyzeMaterial`). Isso evita
+ * desperdiçar tokens em sources que o aluno só "espiou" sem gerar quiz.
  */
 export async function suggestThemes(sourceIds: string[]): Promise<string[]> {
-  const themes = new Set<string>();
+  const themesArrays = await Promise.all(
+    sourceIds.map(async (id) => {
+      const source = getSource(id);
+      if (!source || source.rawText === null) return [];
 
-  for (const id of sourceIds) {
-    const source = getSource(id);
-    if (!source || source.rawText === null) continue;
-
-    let analysis: AnalysisResult;
-    if (source.extractedConcepts) {
-      try {
-        analysis = JSON.parse(source.extractedConcepts) as AnalysisResult;
-      } catch {
-        analysis = await analyzeAndCache(id, source.rawText, () => {});
+      // Caminho 1: cache existe — instantâneo
+      if (source.extractedConcepts) {
+        try {
+          const cached = JSON.parse(source.extractedConcepts) as AnalysisResult;
+          return cached.suggestedThemes.map((t) => t.trim());
+        } catch {
+          // Cache corrompido — cai pro caminho leve
+        }
       }
-    } else {
-      analysis = await analyzeAndCache(id, source.rawText, () => {});
+
+      // Caminho 2: prompt leve dedicado (sem cachear)
+      return suggestThemesFromText(source.rawText);
+    }),
+  );
+
+  // Dedupe case-insensitive preservando ordem da 1ª aparição
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const arr of themesArrays) {
+    for (const t of arr) {
+      const key = t.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(t);
     }
-
-    analysis.suggestedThemes.forEach((t) => themes.add(t.trim()));
   }
-
-  return Array.from(themes);
+  return result;
 }
 
 // ── Helpers internos ──────────────────────────────────────────────────────
