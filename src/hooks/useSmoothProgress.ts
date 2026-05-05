@@ -3,29 +3,29 @@ import { useEffect, useRef, useState } from 'react';
 /*
   Interpolação visual de progresso (v0.8.5+).
 
-  Problema: o backend reporta progresso em saltos discretos (ex: 5% → 30% →
-  35% → 75% → 100%). A barra fica parada por 10-20s entre saltos, dando
-  sensação de "travado". UX ruim mesmo quando o pipeline está rodando.
+  Problema original: backend reporta progresso em saltos discretos
+  (ex: 5% → 30% → 35% → 75% → 100%). Barra fica parada por 10-20s entre
+  saltos, dando sensação de "travado".
 
   Solução: entre cada checkpoint REAL recebido do backend, interpolamos
-  visualmente em direção ao próximo checkpoint estimado, usando duração
-  empírica de cada estágio. Curva ease-out (rápida no início, desacelera) —
-  garante que NUNCA chega no próximo ceiling antes do backend mandar o
-  update real, evitando "ultrapassar" e ter que voltar.
+  visualmente em direção ao próximo ceiling estimado, com curva ease-out
+  (rápida no início, desacelera). Nunca ultrapassa o ceiling antes do
+  backend mandar update real, evitando "voltar" se o pipeline for mais
+  rápido que o esperado.
 
-  Estratégia:
-  - Recebeu valor X → snap visual pra X
-  - Próximo ceiling Y conhecido → interpola X → Y durante `durationMs`
-  - Quando o backend manda Y de verdade → snap pra Y, repete pro próximo
-  - Se backend manda valor maior que o display atual → snap (acelera)
-  - Se backend manda valor menor (improvável) → snap também (consistência)
+  v0.8.6: 2 correções importantes:
+  1. **Math.max** em todo setDisplayPct: barra NUNCA volta. React strict
+     mode (em dev) e re-renders podem disparar useEffect 2x com mesmo
+     realPct — sem o Math.max, o snap pra realPct (menor que display
+     interpolado) fazia a barra voltar.
+  2. **Backend agora reporta progresso GRANULAR** durante análise paralela
+     (1 update por source que completa). Isso resolve o caso de "muitos
+     PDFs travados em 28%": agora a barra avança a cada source completada,
+     em vez de ficar esperando todos.
 
-  Usado pra geração de quiz onde temos checkpoints conhecidos:
-  - 5% (análise inicia) → ceiling 28% em ~12s
-  - 30% (análise completa) → ceiling 33% em ~1s
-  - 35% (geração inicia) → ceiling 70% em ~18s
-  - 75% (validação inicia) → ceiling 95% em ~6s
-  - 100% (fim) → snap
+  Estágios continuam aqui pra cobrir os gaps que ainda existem (35→75
+  durante geração, 75→100 durante validação). Quando backend mandar updates
+  intermediários, o snap atualiza e o ceiling pode ser ajustado.
 */
 
 interface Stage {
@@ -38,12 +38,13 @@ interface Stage {
 }
 
 const QUIZ_STAGES: Stage[] = [
-  // Etapa 1: análise (5 → 28% em ~12s; 30 = "completa", quase instantâneo)
+  // Etapa 1: análise (a partir de v0.8.6 o backend já reporta progress
+  // granular entre 5%-28%; o stage aqui é fallback caso só venha 1 update).
   { fromPct: 5, ceilingPct: 28, durationMs: 12_000 },
   { fromPct: 30, ceilingPct: 33, durationMs: 1_000 },
-  // Etapa 2: geração (35 → 70 em ~18s, etapa mais longa)
+  // Etapa 2: geração (35 → 70 em ~18s, etapa mais longa, sem updates intermediários)
   { fromPct: 35, ceilingPct: 70, durationMs: 18_000 },
-  // Etapa 3: validação (75 → 95 em ~6s)
+  // Etapa 3: validação (75 → 95 em ~6s; com Haiku 4.5 desde v0.8.4)
   { fromPct: 75, ceilingPct: 95, durationMs: 6_000 },
 ];
 
@@ -51,10 +52,9 @@ const TICK_MS = 100;
 
 /**
  * Pega o pct real do backend e retorna um pct visual interpolado.
- * Quando o backend dá saltos longos, a barra continua se mexendo em
- * direção ao próximo ceiling estimado. Ease-out evita ultrapassar.
+ * Garante que a barra NUNCA regride — `Math.max` em todos os updates.
  *
- * Pass `null` ou pct=0 quando não está rodando — reseta o estado interno.
+ * Pass `null` quando não está rodando — reseta o estado interno pra 0.
  */
 export function useSmoothProgress(realPct: number | null): number {
   const [displayPct, setDisplayPct] = useState(0);
@@ -72,28 +72,33 @@ export function useSmoothProgress(realPct: number | null): number {
       return;
     }
 
-    // Snap visual pra valor real (subindo OU descendo — consistência)
-    setDisplayPct(realPct);
+    // Snap pra realPct, MAS nunca volta. Defesa contra:
+    // - StrictMode em dev rodando effect 2x
+    // - Backend mandando updates fora de ordem (Promise.all paralelo)
+    // - Re-render por outro motivo
+    setDisplayPct((prev) => Math.max(prev, realPct));
 
-    // 100% → fim, sem mais interpolação
     if (realPct >= 100) return;
 
-    // Acha estágio compatível pra interpolar
-    const stage = QUIZ_STAGES.find((s) => s.fromPct === realPct);
+    // Acha estágio compatível pra interpolação. Se não tiver match exato
+    // (porque backend agora manda valores intermediários como 9%, 12%, 17%...),
+    // achar o estágio CUJO range cobre o realPct atual.
+    const stage =
+      QUIZ_STAGES.find((s) => s.fromPct === realPct) ??
+      QUIZ_STAGES.find((s) => realPct > s.fromPct && realPct < s.ceilingPct);
     if (!stage) return;
 
     const startTime = Date.now();
     const startPct = realPct;
     const span = stage.ceilingPct - startPct;
+    if (span <= 0) return;
 
     intervalRef.current = setInterval(() => {
       const elapsed = Date.now() - startTime;
       const fraction = Math.min(1, elapsed / stage.durationMs);
-      // Ease-out: 1 - (1-x)^2 — começa rápido, desacelera. Garante que se
-      // aproxima do ceiling sem nunca atingi-lo antes do backend mandar update.
       const eased = 1 - Math.pow(1 - fraction, 2);
       const interpolated = startPct + span * eased;
-      setDisplayPct(interpolated);
+      setDisplayPct((prev) => Math.max(prev, interpolated));
       if (fraction >= 1 && intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;

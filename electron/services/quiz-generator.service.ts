@@ -84,28 +84,50 @@ export async function generateQuiz(
     inicial, bem acima do que disparamos aqui (5-10 reqs em paralelo).
   */
   const sourceErrors: Array<{ filename: string; error: string }> = [];
+  let completedCount = 0;
   let cacheHits = 0;
 
+  /*
+    v0.8.6: progress granular DURANTE a análise paralela. Cada source que
+    completa (cache hit OU análise nova) incrementa o contador e reporta
+    pct proporcional entre 5% e 28%. Resolve o problema de "barra travada
+    em 28% por minutos" quando há muitos PDFs sem cache (etapa 1 longa).
+
+    Promise.all dispara N em paralelo; o `then` de cada uma chama
+    onProgress assim que aquela source termina. Updates chegam fora de
+    ordem mas são monotonicamente crescentes — frontend trata via
+    Math.max em useSmoothProgress.
+  */
   const settled = await Promise.all(
     sources.map(async (source): Promise<AnalysisResult | null> => {
       try {
-        // Cache hit: instantâneo
+        let result: AnalysisResult;
         if (source.extractedConcepts) {
           try {
-            const cached = JSON.parse(source.extractedConcepts) as AnalysisResult;
+            result = JSON.parse(source.extractedConcepts) as AnalysisResult;
             cacheHits++;
-            return cached;
           } catch {
-            // Cache corrompido → cai pro caminho da análise
+            // Cache corrompido → re-analisa
+            result = await analyzeAndCache(source.id, source.rawText!, () => {});
           }
+        } else {
+          result = await analyzeAndCache(source.id, source.rawText!, () => {});
         }
-        // Análise nova (chamada Claude). Progress callback é grosso aqui
-        // porque vários rodam em paralelo — tracking individual seria ruído.
-        return await analyzeAndCache(source.id, source.rawText!, () => {});
+        completedCount++;
+        // Mapeia [5%, 28%] proporcionalmente conforme sources completam
+        const pct = 5 + Math.round((completedCount / sources.length) * 23);
+        onProgress(
+          pct,
+          `Analisando materiais (${completedCount}/${sources.length})…`,
+        );
+        return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[quiz-generator] análise falhou pra ${source.filename}:`, err);
         sourceErrors.push({ filename: source.filename, error: message });
+        completedCount++;
+        const pct = 5 + Math.round((completedCount / sources.length) * 23);
+        onProgress(pct, `Analisando materiais (${completedCount}/${sources.length})…`);
         return null;
       }
     }),
@@ -113,15 +135,13 @@ export async function generateQuiz(
 
   const analyses = settled.filter((a): a is AnalysisResult => a !== null);
 
-  // Progress: pula direto pra 30% após análise paralela.
-  if (cacheHits === sources.length) {
-    onProgress(30, `${sources.length} ${sources.length === 1 ? 'material' : 'materiais'}: análise em cache.`);
-  } else {
-    onProgress(
-      30,
-      `Análise concluída (${analyses.length}/${sources.length} ${sources.length === 1 ? 'material' : 'materiais'}).`,
-    );
-  }
+  // Checkpoint final da etapa 1 (sempre, independente de cache).
+  onProgress(
+    30,
+    cacheHits === sources.length
+      ? `Análise: ${sources.length} ${sources.length === 1 ? 'material' : 'materiais'} (cache)`
+      : `Análise concluída (${analyses.length}/${sources.length}).`,
+  );
 
   if (analyses.length === 0) {
     const detail = sourceErrors

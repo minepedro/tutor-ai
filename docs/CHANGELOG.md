@@ -4,6 +4,23 @@ Releases em ordem reversa.
 
 ---
 
+## v0.8.6 (2026-05-05) — Fix: barra de progresso voltava + travava em N PDFs
+
+Correção de 2 bugs reportados após v0.8.5 em geração de quiz com **muitos PDFs** (13 sources sem cache):
+
+### Corrigido
+- **Barra "voltava" pra valor menor entre interpolações.** O hook `useSmoothProgress` fazia `setDisplayPct(realPct)` no snap mas isso podia regredir o display interpolado se React strict mode (dev) rodasse o effect 2× ou um re-render disparasse com mesmo valor. Agora usa `setDisplayPct((prev) => Math.max(prev, realPct))` — barra **nunca volta**.
+- **Barra travava em ~28% por minutos** quando havia muitos PDFs sem cache. Ceiling do estágio 1 estava calibrado pra 1 source (~12s); com 13 sources paralelos a etapa 1 pode demorar 30-60s e a barra atingia o ceiling muito antes do backend mandar `30%`.
+
+### Mudado
+- **Backend reporta progresso GRANULAR** durante análise paralela: cada source que completa (cache hit OU análise nova) chama `onProgress` com pct proporcional entre 5% e 28%. Pra 13 PDFs: 13 updates intermediários em vez de só 1 ao final. Status mostra "Analisando materiais (3/13)…" em vez de ficar parado em "Analisando material…".
+- Hook `useSmoothProgress` ajustado pra também aceitar valores intermediários no range de cada estágio (não só os `fromPct` exatos).
+
+### Sem mudança
+- Tempo total de geração idêntico — mudança puramente de feedback visual.
+
+---
+
 ## v0.8.5 (2026-05-05) — Barra de progresso do quiz com interpolação suave
 
 ### Corrigido
